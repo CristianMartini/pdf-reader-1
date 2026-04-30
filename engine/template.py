@@ -24,6 +24,7 @@ import sys
 import json
 import re
 import tempfile
+from functools import lru_cache
 
 try:
     from PIL import Image as PILImage
@@ -103,9 +104,10 @@ def _logo_mask(path: str):
         return "auto"
     return None  # JPEG: sem mask para evitar fundo preto
 
+@lru_cache(maxsize=32)
 def _preprocess_image(img_path: str,
                       max_px: int = 1400,
-                      quality: int = 82) -> str:
+                      quality: int = 80) -> str:
     """
     Redimensiona e converte imagens grandes para JPEG antes de passar ao ReportLab.
     - Imagens <= max_px em ambas as dimensões: retorna o caminho original.
@@ -493,7 +495,8 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
     doc = SimpleDocTemplate(
         output_path, pagesize=A4,
         leftMargin=3 * cm, rightMargin=2 * cm,
-        topMargin=3 * cm, bottomMargin=2 * cm
+        topMargin=3 * cm, bottomMargin=2 * cm,
+        pageCompression=1
     )
 
     story = parse_md(md_path, assets_dir)
