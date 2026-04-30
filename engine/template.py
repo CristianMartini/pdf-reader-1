@@ -71,16 +71,18 @@ def _cover_path(assets):
     return None
 
 # ── Estilos ──
-H1 = ParagraphStyle("H1", fontName=FONT_BOLD, fontSize=20,
-                    textColor=NAVY, spaceBefore=20, spaceAfter=8, leading=26)
-H2 = ParagraphStyle("H2", fontName=FONT_BOLD, fontSize=15,
-                    textColor=NAVY, spaceBefore=14, spaceAfter=6, leading=20)
+H1 = ParagraphStyle("H1", fontName=FONT_BOLD, fontSize=16,
+                    textColor=NAVY, spaceBefore=16, spaceAfter=8, leading=22,
+                    alignment=4)
+H2 = ParagraphStyle("H2", fontName=FONT_BOLD, fontSize=14,
+                    textColor=NAVY, spaceBefore=12, spaceAfter=6, leading=19)
 H3 = ParagraphStyle("H3", fontName=FONT_BOLD, fontSize=12,
                     textColor=GRAY, spaceBefore=8, spaceAfter=4, leading=16)
-BODY = ParagraphStyle("BODY", fontName=FONT_REG, fontSize=11,
-                      leading=17, textColor=NAVY, spaceAfter=6)
-LIST = ParagraphStyle("LIST", fontName=FONT_REG, fontSize=11,
-                      leading=16, textColor=NAVY, leftIndent=16, spaceAfter=3)
+BODY = ParagraphStyle("BODY", fontName=FONT_REG, fontSize=12,
+                      leading=18, textColor=NAVY, spaceAfter=8,
+                      alignment=4)
+LIST = ParagraphStyle("LIST", fontName=FONT_REG, fontSize=12,
+                      leading=18, textColor=NAVY, leftIndent=20, spaceAfter=4)
 BOX  = ParagraphStyle("BOX", fontName=FONT_REG, fontSize=11,
                       backColor=colors.HexColor("#F5F6FA"),
                       borderColor=GOLD, borderWidth=4,
@@ -198,32 +200,41 @@ def draw_cover(canvas, doc, meta: dict, assets: str):
 # PÁGINAS INTERNAS — modeloDePagina.svg
 # ════════════════════════════════════════
 def header_footer(canvas, doc, assets: str):
-    """
-    Layout extraído de modeloDePagina.svg.
-    """
+    """Cabeçalho/rodapé com padrão institucional e paginação ABNT."""
     canvas.saveState()
-    
-    try:
-        from svglib.svglib import svg2rlg
-        from reportlab.graphics import renderPDF
-        
-        svg_path = os.path.join(os.path.dirname(__file__), "..", "instruçoes", "modeloDePagina.svg")
-        if os.path.exists(svg_path):
-            drawing = svg2rlg(svg_path)
-            if drawing:
-                # Escala o SVG para preencher a folha A4 (W, H)
-                sx = W / drawing.width
-                sy = H / drawing.height
-                drawing.scale(sx, sy)
-                renderPDF.draw(drawing, canvas, 0, 0)
-    except Exception as e:
-        print("Erro ao carregar o SVG:", e)
-        pass
 
-    # A página 1 real será a página 2 visual
-    canvas.setFont(FONT_REG, 10)
+    logo = _logo_path(assets)
+    header_y = H - 1.9 * cm
+    footer_y = 1.6 * cm
+
+    # Cabeçalho: linha + logo + nome institucional
+    canvas.setStrokeColor(GOLD)
+    canvas.setLineWidth(1.6)
+    canvas.line(2 * cm, header_y - 0.55 * cm, W - 2 * cm, header_y - 0.55 * cm)
+
+    if logo:
+        canvas.drawImage(
+            logo,
+            2 * cm,
+            header_y - 0.45 * cm,
+            width=2.4 * cm,
+            height=0.9 * cm,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+
     canvas.setFillColor(NAVY)
-    canvas.drawRightString(W - 2 * cm, 1.8 * cm, f"Página {doc.page + 1}")
+    canvas.setFont(FONT_BOLD, 10)
+    canvas.drawRightString(W - 2 * cm, header_y, "Material Didático")
+
+    # Rodapé: linha + página centralizada (ABNT)
+    canvas.setStrokeColor(colors.HexColor("#C7D2E8"))
+    canvas.setLineWidth(0.8)
+    canvas.line(2 * cm, footer_y + 0.4 * cm, W - 2 * cm, footer_y + 0.4 * cm)
+
+    canvas.setFillColor(colors.HexColor("#4A5568"))
+    canvas.setFont(FONT_REG, 10)
+    canvas.drawCentredString(W / 2, footer_y - 0.05 * cm, str(doc.page))
 
     canvas.restoreState()
 
@@ -386,7 +397,7 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
     doc = SimpleDocTemplate(
         output_path, pagesize=A4,
         leftMargin=2*cm, rightMargin=2*cm,
-        topMargin=3.2*cm, bottomMargin=2.5*cm
+        topMargin=3.4*cm, bottomMargin=2.6*cm
     )
 
     story = parse_md(md_path, assets_dir)

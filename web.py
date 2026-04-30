@@ -30,7 +30,8 @@ def index():
 def api_files():
     mds = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(INPUTS, "*.md")))]
     imgs = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(ASSETS, "*.*")))]
-    pdfs = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(OUTPUTS, "*.pdf")), key=os.path.getmtime, reverse=True)]
+    pdf_paths = sorted(Path(OUTPUTS).glob("**/*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True)
+    pdfs = [str(p.relative_to(OUTPUTS)).replace('\\', '/') for p in pdf_paths]
     return jsonify(mds=mds, imgs=imgs, pdfs=pdfs)
 
 @app.route("/api/file/<filename>")
@@ -104,7 +105,10 @@ def api_generate():
 
 @app.route("/outputs/<path:filename>")
 def serve_output(filename):
-    return send_from_directory(OUTPUTS, filename)
+    safe_path = os.path.normpath(filename).replace('\\', '/')
+    if safe_path.startswith('..'):
+        return jsonify(ok=False, error='Caminho inválido'), 400
+    return send_from_directory(OUTPUTS, safe_path)
 
 if __name__ == "__main__":
     print("\n" + "═"*50)

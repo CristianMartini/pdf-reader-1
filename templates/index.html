@@ -145,6 +145,8 @@
 
   /* ── LISTAS ── */
   .file-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+  #pdfList {gap: 12px; max-height: none;}
+  .pdf-item{background:linear-gradient(135deg,#f9fbff,#eef3ff); border-left:4px solid var(--gold);}
   .file-item, .pdf-item, .img-item {
     display: flex;
     align-items: center;
@@ -221,7 +223,7 @@
 
 <header>
   <div class="brand">
-    <span>⚡ PDF Engine</span>
+    <span>⚡ PDF Engine • Padrão ABNT</span>
   </div>
 </header>
 
@@ -333,7 +335,7 @@ async function loadLists() {
   // PDF List
   const pdfList = document.getElementById("pdfList");
   pdfList.innerHTML = d.pdfs.map(f => `
-    <div class="pdf-item" style="width: calc(33.333% - 10px);">
+    <div class="pdf-item" style="width: min(100%, 390px);">
       <span class="name">📑 ${f}</span>
       <a href="/outputs/${f}" target="_blank" class="btn btn-primary btn-sm">Abrir</a>
       <button class="btn btn-danger btn-sm" onclick="deleteFile('pdf', '${f}')">🗑</button>
