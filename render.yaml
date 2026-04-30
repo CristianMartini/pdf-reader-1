@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: pdf-engine
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn web:app"
+    disk:
+      name: data
+      mountPath: /opt/render/project/src/projects
+      sizeGB: 1
+    envVars:
+      - key: PYTHONIOENCODING
+        value: "utf-8"
