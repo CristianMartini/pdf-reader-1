@@ -21,8 +21,9 @@ from werkzeug.utils import secure_filename
 # ── Base ──
 BASE     = os.path.dirname(os.path.abspath(__file__))
 PROJECTS = os.path.join(BASE, "projects")
+TMPL_DIR = os.path.join(BASE, "templates")
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=TMPL_DIR)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024  # 64 MB
 
 os.makedirs(PROJECTS, exist_ok=True)
