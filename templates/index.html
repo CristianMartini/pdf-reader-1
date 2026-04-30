@@ -5,303 +5,117 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PDF Engine — Evolux Academy</title>
 <style>
-  :root {
-    --navy:  #011641;
-    --gold:  #e2a331;
-    --yellow:#f9d549;
-    --bg:    #f4f6fb;
-    --card:  #ffffff;
-    --text:  #1a2340;
-    --muted: #6b7a99;
-    --border:#dde3f0;
-    --green: #22c55e;
-    --red:   #ef4444;
-  }
+:root{--navy:#011641;--gold:#e2a331;--bg:#f4f6fb;--card:#fff;--text:#1a2340;--muted:#6b7a99;--border:#dde3f0;--green:#22c55e;--red:#ef4444;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;}
+header{background:var(--navy);padding:0 2rem;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 12px rgba(0,0,0,.18);}
+.brand{color:var(--gold);font-size:1.1rem;font-weight:700;letter-spacing:.5px;}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+/* Layout */
+.app{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 60px);}
+@media(max-width:900px){.app{grid-template-columns:1fr;}}
 
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-  }
+/* Sidebar projetos */
+.sidebar{background:#fff;border-right:1px solid var(--border);padding:1.2rem;display:flex;flex-direction:column;gap:1rem;}
+.sidebar h3{font-size:.85rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+.project-item{padding:10px 12px;border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:all .15s;display:flex;justify-content:space-between;align-items:center;}
+.project-item:hover{border-color:var(--gold);}
+.project-item.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+.project-item.active .proj-meta{color:#afc6ff;}
+.proj-name{font-weight:600;font-size:.9rem;}
+.proj-meta{font-size:.75rem;color:var(--muted);}
+.proj-del{background:none;border:none;cursor:pointer;color:inherit;opacity:.5;padding:2px 6px;border-radius:4px;}
+.proj-del:hover{opacity:1;color:var(--red);}
 
-  /* ── HEADER ── */
-  header {
-    background: var(--navy);
-    padding: 0 2rem;
-    height: 60px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.18);
-  }
-  header .brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  header .brand span {
-    color: var(--gold);
-    font-size: 1.1rem;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-  }
+/* Main */
+.main{padding:1.5rem;display:grid;grid-template-columns:1fr 1.4fr;gap:1.2rem;align-content:start;}
+@media(max-width:1100px){.main{grid-template-columns:1fr;}}
+.full{grid-column:1/-1;}
 
-  /* ── LAYOUT ── */
-  .container {
-    max-width: 1300px;
-    margin: 0 auto;
-    padding: 2rem 1.5rem;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.5rem;
-  }
-  @media (max-width: 900px) {
-    .container { grid-template-columns: 1fr; }
-  }
+/* Card */
+.card{background:#fff;border-radius:14px;padding:1.3rem;box-shadow:0 2px 16px rgba(1,22,65,.07);border:1px solid var(--border);}
+.card-title{font-size:1rem;font-weight:700;color:var(--navy);margin-bottom:.8rem;display:flex;justify-content:space-between;align-items:center;gap:8px;}
 
-  /* ── CARD ── */
-  .card {
-    background: var(--card);
-    border-radius: 14px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 16px rgba(1,22,65,0.07);
-    border: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-  }
-  .card h2 {
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: var(--navy);
-    margin-bottom: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    justify-content: space-between;
-  }
-  
-  .full-width { grid-column: 1 / -1; }
+/* Files */
+.file-list{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto;}
+.file-item,.img-item,.pdf-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:#fafbff;transition:border-color .15s;font-size:.85rem;}
+.file-item:hover,.img-item:hover,.pdf-item:hover{border-color:var(--gold);}
+.file-item.active{border-color:var(--navy);background:#eef3ff;}
+.f-name{flex:1;font-weight:500;word-break:break-all;}
+.pdf-item{background:linear-gradient(135deg,#f9fbff,#eef3ff);border-left:3px solid var(--gold);}
 
-  /* ── EDITOR ── */
-  .editor-container {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    flex: 1;
-  }
-  .editor-toolbar {
-    display: flex;
-    gap: 8px;
-    background: #f8fafc;
-    padding: 8px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-  }
-  textarea#mdEditor {
-    width: 100%;
-    min-height: 400px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    font-family: "Courier New", monospace;
-    font-size: 14px;
-    resize: vertical;
-  }
-  .editor-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 10px;
-  }
+/* Editor */
+.toolbar{display:flex;gap:6px;flex-wrap:wrap;background:#f8fafc;padding:7px;border-radius:8px;border:1px solid var(--border);margin-bottom:8px;}
+textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border);border-radius:8px;font-family:"Courier New",monospace;font-size:13px;resize:vertical;line-height:1.6;}
+.actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center;}
 
-  /* ── BOTÕES ── */
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 18px;
-    border-radius: 8px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-    transition: all .15s;
-    text-decoration: none;
-  }
-  .btn-primary { background: var(--navy); color: #fff; }
-  .btn-primary:hover { background: #02245e; }
-  .btn-gold { background: var(--gold); color: var(--navy); }
-  .btn-gold:hover { background: #d09428; }
-  .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
-  .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-  .btn-ghost:hover { border-color: var(--navy); color: var(--navy); }
-  .btn-danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
-  .btn-danger:hover { background: var(--red); color: white; }
+/* Btns */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 16px;border-radius:8px;font-size:.83rem;font-weight:600;border:none;cursor:pointer;transition:all .15s;text-decoration:none;}
+.btn-primary{background:var(--navy);color:#fff;}.btn-primary:hover{background:#02245e;}
+.btn-gold{background:var(--gold);color:var(--navy);}.btn-gold:hover{background:#d09428;}
+.btn-sm{padding:4px 10px;font-size:.78rem;}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);}.btn-ghost:hover{border-color:var(--navy);color:var(--navy);}
+.btn-danger{background:transparent;color:var(--red);border:1px solid var(--red);}.btn-danger:hover{background:var(--red);color:#fff;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
 
-  /* ── LISTAS ── */
-  .file-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
-  #pdfList {gap: 12px; max-height: none;}
-  .pdf-item{background:linear-gradient(135deg,#f9fbff,#eef3ff); border-left:4px solid var(--gold);}
-  .file-item, .pdf-item, .img-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: #fafbff;
-    transition: border-color .15s;
-  }
-  .file-item:hover, .pdf-item:hover, .img-item:hover { border-color: var(--gold); }
-  .file-item .name, .pdf-item .name, .img-item .name {
-    flex: 1; font-size: 0.875rem; font-weight: 500; word-break: break-all;
-  }
-  
-  /* ── INPUTS & EXTRAS ── */
-  .form-group {
-    margin-bottom: 15px;
-  }
-  .form-group label {
-    display: block;
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin-bottom: 5px;
-    color: var(--navy);
-  }
-  .form-control {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.9rem;
-  }
+/* Log */
+.log{background:var(--navy);border-radius:8px;padding:.8rem;font-family:monospace;font-size:.78rem;color:#afc6ff;max-height:160px;overflow-y:auto;white-space:pre-wrap;display:none;margin-top:.8rem;}
+.log.on{display:block;}.log .ok{color:var(--green);}.log .err{color:var(--red);}
 
-  /* ── LOG ── */
-  .log-box {
-    background: var(--navy);
-    border-radius: 10px;
-    padding: 1rem;
-    font-family: "Courier New", monospace;
-    font-size: 0.8rem;
-    color: #afc6ff;
-    max-height: 240px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    display: none;
-  }
-  .log-box.visible { display: block; }
-  .log-box .ok  { color: var(--green); }
-  .log-box .err { color: var(--red); }
-  
-  /* ── TOAST ── */
-  #toast {
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
-    background: var(--navy);
-    color: #fff;
-    padding: 0.75rem 1.25rem;
-    border-radius: 10px;
-    transform: translateY(100px);
-    opacity: 0;
-    transition: all .3s;
-    z-index: 999;
-  }
-  #toast.show { transform: translateY(0); opacity: 1; }
-  #toast.success { border-left: 4px solid var(--green); }
-  #toast.error   { border-left: 4px solid var(--red); }
+/* Toast */
+#toast{position:fixed;bottom:1.5rem;right:1.5rem;background:var(--navy);color:#fff;padding:.7rem 1.2rem;border-radius:10px;transform:translateY(100px);opacity:0;transition:all .3s;z-index:999;font-size:.88rem;}
+#toast.show{transform:translateY(0);opacity:1;}
+#toast.success{border-left:4px solid var(--green);}
+#toast.error{border-left:4px solid var(--red);}
 
-  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+/* Empty state */
+.empty{text-align:center;padding:3rem 1rem;color:var(--muted);}
+.empty h2{margin-bottom:.5rem;color:var(--navy);}
+.muted{color:var(--muted);font-size:.82rem;}
+
+/* New project input */
+.new-proj{display:flex;gap:6px;}
+.new-proj input{flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:.85rem;}
+
+.spinning{display:inline-block;animation:spin 1s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 
 <header>
-  <div class="brand">
-    <span>⚡ PDF Engine • Padrão ABNT</span>
+  <span class="brand">⚡ PDF Engine • Evolux Academy</span>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <a href="/api/instrucoes-ia" class="btn btn-ghost btn-sm" style="color:#afc6ff; border-color:rgba(175,198,255,0.3); font-weight:normal;" title="Baixe o manual de formatação para alimentar IAs">🤖 Instruções IA</a>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <div class="dot"></div>
+      <span style="color:#afc6ff;font-size:.8rem;">live</span>
+    </div>
   </div>
 </header>
 
-<div class="container">
+<div class="app">
 
-  <!-- ══ ARQUIVOS MD E EXTRAS ══ -->
-  <div class="card">
-    <h2><span class="ico">📂</span> Arquivos & Imagens</h2>
-    
-    <div style="margin-bottom: 1rem;">
-      <div class="flex-between" style="margin-bottom: 8px;">
-        <h3 style="font-size:0.9rem;">Documentos (.md)</h3>
-        <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdFileInput').click()">+ Novo / Upload MD</button>
-        <input type="file" id="mdFileInput" accept=".md" style="display:none" onchange="uploadFile(this, 'md')">
-      </div>
-      <div class="file-list" id="mdList"></div>
-    </div>
-
-    <hr style="border:none; border-top:1px solid var(--border); margin: 15px 0;">
-
-    <div style="margin-bottom: 1rem;">
-      <div class="flex-between" style="margin-bottom: 8px;">
-        <h3 style="font-size:0.9rem;">Imagens & Assets (Capa, Logo, Fotos)</h3>
-        <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgFileInput').click()">+ Upload Imagem</button>
-        <input type="file" id="imgFileInput" accept="image/*,.svg" multiple style="display:none" onchange="uploadFile(this, 'img')">
-      </div>
-      <div class="file-list" id="imgList"></div>
-      <p style="font-size:0.75rem; color:var(--muted); margin-top:5px;">Para usar uma imagem no texto, digite: <code>[IMG:nome.jpg]</code></p>
-    </div>
-    
-    <hr style="border:none; border-top:1px solid var(--border); margin: 15px 0;">
-    
+  <!-- ══ SIDEBAR PROJETOS ══ -->
+  <aside class="sidebar">
     <div>
-       <h3 style="font-size:0.9rem; margin-bottom: 8px;">Extras do PDF (Configuração da Aula)</h3>
-       <div class="form-group">
-         <label>Título da Aula (Capa)</label>
-         <input type="text" id="metaTitle" class="form-control" placeholder="Ex: Anatomia Humana">
-       </div>
-       <div class="form-group">
-         <label>Número da Aula</label>
-         <input type="text" id="metaAula" class="form-control" placeholder="Ex: 03">
-       </div>
-    </div>
-  </div>
-
-  <!-- ══ EDITOR ══ -->
-  <div class="card">
-    <h2>
-      <span><span class="ico">✍️</span> Editor Markdown</span>
-      <span id="currentFileName" style="font-size:0.9rem; color:var(--muted); font-weight:normal;">Nenhum arquivo selecionado</span>
-    </h2>
-    
-    <div class="editor-container">
-      <div class="editor-toolbar">
-        <button class="btn btn-ghost btn-sm" onclick="insertAtCursor('# ')">H1</button>
-        <button class="btn btn-ghost btn-sm" onclick="insertAtCursor('## ')">H2</button>
-        <button class="btn btn-ghost btn-sm" onclick="insertAtCursor('### ')">H3</button>
-        <button class="btn btn-ghost btn-sm" onclick="insertAtCursor('- ')">Lista</button>
-        <button class="btn btn-ghost btn-sm" onclick="insertBox()">Box</button>
-        <button class="btn btn-ghost btn-sm" onclick="insertAtCursor('\\n[IMG:nome_da_imagem.jpg]\\n')">Imagem</button>
-      </div>
-      
-      <textarea id="mdEditor" placeholder="Selecione um arquivo ou digite seu texto aqui..."></textarea>
-      
-      <div class="editor-actions">
-        <button class="btn btn-primary" onclick="saveMarkdown()">💾 Salvar</button>
-        <button class="btn btn-gold" onclick="generatePdfFromEditor()">▶ Gerar PDF deste arquivo</button>
-        <button class="btn btn-danger" onclick="deleteCurrentFile()" id="btnDeleteCurrent" style="display:none; margin-left:auto;">🗑 Excluir</button>
+      <h3 style="margin-bottom:.6rem;">📁 Projetos</h3>
+      <div class="new-proj">
+        <input id="newProjName" placeholder="Nome do projeto..." onkeydown="if(event.key==='Enter')createProject()">
+        <button class="btn btn-gold btn-sm" onclick="createProject()">＋</button>
       </div>
     </div>
-    
-    <div class="log-box" id="logBox" style="margin-top:1rem;"></div>
-  </div>
+    <div id="projectList" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;"></div>
+  </aside>
 
-  <!-- ══ PDFs GERADOS ══ -->
-  <div class="card full-width">
-    <h2><span class="ico">📑</span> PDFs Gerados</h2>
-    <div class="file-list" id="pdfList" style="flex-direction:row; flex-wrap:wrap;"></div>
+  <!-- ══ MAIN ══ -->
+  <div class="main" id="mainArea">
+    <div class="empty full">
+      <h2>Selecione ou crie um projeto</h2>
+      <p>Cada projeto tem seus próprios documentos, imagens e PDFs.</p>
+    </div>
   </div>
 
 </div>
@@ -309,192 +123,294 @@
 <div id="toast"></div>
 
 <script>
-let currentFile = null;
+let proj = null;   // projeto ativo
+let file = null;   // arquivo ativo
+let _mdSig = "", _pdfSig = "";
+let _toastT = null;
 
-async function loadLists() {
-  const r = await fetch("/api/files");
+// ══ PROJETOS ══
+async function loadProjects() {
+  const r = await fetch("/api/projects");
   const d = await r.json();
-  
-  // MD List
-  const mdList = document.getElementById("mdList");
-  mdList.innerHTML = d.mds.map(f => `
-    <div class="file-item" style="cursor:pointer;" onclick="loadFile('${f}')">
-      <span class="name">📄 ${f}</span>
+  const el = document.getElementById("projectList");
+  el.innerHTML = d.projects.map(p => `
+    <div class="project-item ${p.name===proj?'active':''}" onclick="selectProject('${p.name}')">
+      <div>
+        <div class="proj-name">📂 ${p.name}</div>
+        <div class="proj-meta">${p.mds} doc${p.mds!==1?'s':''} • ${p.pdfs} PDF${p.pdfs!==1?'s':''}</div>
+      </div>
+      <button class="proj-del" onclick="event.stopPropagation();deleteProject('${p.name}')" title="Excluir projeto">🗑</button>
     </div>
-  `).join("") || '<p class="muted">Nenhum documento</p>';
-
-  // Img List
-  const imgList = document.getElementById("imgList");
-  imgList.innerHTML = d.imgs.map(f => `
-    <div class="img-item">
-      <span class="name" style="cursor:pointer;" onclick="insertAtCursor('\\n[IMG:${f}]\\n')" title="Clique para inserir no texto">🖼️ ${f}</span>
-      <button class="btn btn-ghost btn-sm" onclick="deleteFile('img', '${f}')">🗑</button>
-    </div>
-  `).join("") || '<p class="muted">Nenhuma imagem enviada</p>';
-
-  // PDF List
-  const pdfList = document.getElementById("pdfList");
-  pdfList.innerHTML = d.pdfs.map(f => `
-    <div class="pdf-item" style="width: min(100%, 390px);">
-      <span class="name">📑 ${f}</span>
-      <a href="/outputs/${f}" target="_blank" class="btn btn-primary btn-sm">Abrir</a>
-      <button class="btn btn-danger btn-sm" onclick="deleteFile('pdf', '${f}')">🗑</button>
-    </div>
-  `).join("") || '<p class="muted">Nenhum PDF gerado</p>';
+  `).join("") || '<p class="muted">Nenhum projeto ainda.</p>';
 }
 
-async function uploadFile(input, type) {
-  if (!input.files.length) return;
-  const fd = new FormData();
-  for(let i=0; i<input.files.length; i++){
-    fd.append("files", input.files[i]);
-  }
-  
-  const r = await fetch(`/api/upload/${type}`, { method:"POST", body: fd });
+async function createProject() {
+  const inp = document.getElementById("newProjName");
+  const name = inp.value.trim();
+  if (!name) return;
+  const r = await fetch("/api/projects", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({name})
+  });
   const d = await r.json();
-  if (d.ok) {
-    toast(`✅ Arquivo(s) enviado(s)`, "success");
-    loadLists();
-    if(type === 'md' && input.files.length === 1) loadFile(input.files[0].name);
-  } else {
-    toast("❌ Erro: " + d.error, "error");
+  if (d.ok) { inp.value=""; await loadProjects(); selectProject(d.name); }
+  else toast("❌ " + d.error, "error");
+}
+
+async function deleteProject(name) {
+  if (!confirm(`Excluir projeto "${name}" e todos os seus arquivos?`)) return;
+  await fetch(`/api/projects/${encodeURIComponent(name)}`, {method:"DELETE"});
+  if (proj === name) { proj=null; file=null; renderEmpty(); }
+  loadProjects();
+  toast("🗑 Projeto removido");
+}
+
+function renderEmpty() {
+  document.getElementById("mainArea").innerHTML = `
+    <div class="empty full"><h2>Selecione ou crie um projeto</h2>
+    <p>Cada projeto tem seus próprios documentos, imagens e PDFs.</p></div>`;
+}
+
+// ══ SELECIONAR PROJETO ══
+function selectProject(name) {
+  proj = name; file = null; _mdSig = ""; _pdfSig = "";
+  loadProjects();
+  renderMain();
+}
+
+function renderMain() {
+  document.getElementById("mainArea").innerHTML = `
+    <!-- Arquivos -->
+    <div class="card">
+      <div class="card-title">
+        <span>📄 Documentos</span>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdUp').click()">＋ Upload .md</button>
+        <input type="file" id="mdUp" accept=".md" style="display:none" onchange="uploadFile(this,'md')">
+      </div>
+      <div class="file-list" id="mdList"></div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:1rem 0;">
+
+      <div class="card-title">
+        <span>🖼️ Imagens</span>
+        <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
+        <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
+      </div>
+      <div class="file-list" id="imgList"></div>
+      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-gold btn-sm" onclick="insertSelectedImages()">▶ Inserir Selecionadas Juntas</button>
+      </div>
+      <p class="muted" style="margin-top:6px; line-height: 1.4;">
+        Clique no nome para inserir 1 imagem sozinha, ou marque as caixas e clique no botão acima para agrupá-las lado a lado.
+      </p>
+    </div>
+
+    <!-- Editor -->
+    <div class="card">
+      <div class="card-title">
+        <span>✍️ Editor</span>
+        <span id="fileName" style="font-size:.82rem;color:var(--muted);font-weight:normal;">Nenhum arquivo</span>
+      </div>
+      <div class="toolbar">
+        <button class="btn btn-ghost btn-sm" onclick="ins('# ')">H1</button>
+        <button class="btn btn-ghost btn-sm" onclick="ins('## ')">H2</button>
+        <button class="btn btn-ghost btn-sm" onclick="ins('### ')">H3</button>
+        <button class="btn btn-ghost btn-sm" onclick="ins('- ')">Lista</button>
+        <button class="btn btn-ghost btn-sm" onclick="insBox()">Box</button>
+        <button class="btn btn-ghost btn-sm" onclick="insImg('nome.jpg')">1 Imagem</button>
+        <button class="btn btn-ghost btn-sm" onclick="insImg('img1.jpg|img2.jpg')">2 Imagens</button>
+        <button class="btn btn-ghost btn-sm" onclick="insDivider()">Divisor</button>
+      </div>
+      <textarea id="ed" placeholder="Selecione um arquivo ou comece a escrever...&#10;&#10;Use front-matter:&#10;---&#10;title: Título da Aula&#10;aula: 01&#10;---"></textarea>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="saveFile()">💾 Salvar</button>
+        <button class="btn btn-gold" id="btnGen" onclick="generatePDF()">▶ Gerar PDF</button>
+        <button class="btn btn-danger" id="btnDel" onclick="deleteCurrentFile()" style="display:none;margin-left:auto;">🗑 Excluir</button>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+
+    <!-- PDFs -->
+    <div class="card full">
+      <div class="card-title">
+        <span>📑 PDFs Gerados</span>
+        <span id="pdfCount" style="font-size:.8rem;color:var(--muted);font-weight:normal;"></span>
+      </div>
+      <div id="pdfList" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
+    </div>
+  `;
+  loadFiles();
+}
+
+// ══ ARQUIVOS ══
+async function loadFiles(silent=false) {
+  if (!proj) return;
+  const r = await fetch(`/api/files/${encodeURIComponent(proj)}`);
+  const d = await r.json();
+
+  const mdSig = JSON.stringify(d.mds);
+  if (mdSig !== _mdSig) {
+    _mdSig = mdSig;
+    document.getElementById("mdList").innerHTML = d.mds.map(f => `
+      <div class="file-item ${f===file?'active':''}" style="cursor:pointer" onclick="loadFile('${f}')">
+        <span class="f-name">📄 ${f}</span>
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();delFile('md','${f}')">🗑</button>
+      </div>`).join("") || '<p class="muted">Nenhum documento</p>';
   }
-  input.value = "";
+
+  document.getElementById("imgList").innerHTML = d.imgs.map(f => `
+    <div class="img-item">
+      <input type="checkbox" class="img-check" value="${f}" style="cursor:pointer; width:16px; height:16px;">
+      <span class="f-name" style="cursor:pointer" onclick="insImg('${f}')" title="Inserir 1 imagem">🖼️ ${f}</span>
+      <button class="btn btn-ghost btn-sm" onclick="delFile('img','${f}')">🗑</button>
+    </div>`).join("") || '<p class="muted">Nenhuma imagem</p>';
+
+  const pdfSig = JSON.stringify(d.pdfs);
+  if (pdfSig !== _pdfSig) {
+    _pdfSig = pdfSig;
+    document.getElementById("pdfList").innerHTML = d.pdfs.map(f => `
+      <div class="pdf-item" style="width:min(100%,360px)">
+        <span class="f-name">📑 ${f}</span>
+        <a href="/projects/${encodeURIComponent(proj)}/pdf/${encodeURIComponent(f)}" target="_blank" class="btn btn-primary btn-sm">Abrir</a>
+        <a href="/projects/${encodeURIComponent(proj)}/pdf/${encodeURIComponent(f)}" download class="btn btn-gold btn-sm">Baixar</a>
+        <button class="btn btn-danger btn-sm" onclick="delFile('pdf','${f}')">🗑</button>
+      </div>`).join("") || '<p class="muted">Nenhum PDF gerado</p>';
+    const c = d.pdfs.length;
+    const el = document.getElementById("pdfCount");
+    if (el) el.textContent = c ? `${c} arquivo${c>1?'s':''}` : "";
+  }
 }
 
 async function loadFile(filename) {
-  const r = await fetch(`/api/file/${filename}`);
+  const r = await fetch(`/api/file/${encodeURIComponent(proj)}/${encodeURIComponent(filename)}`);
   const d = await r.json();
-  if(d.ok) {
-    document.getElementById("mdEditor").value = d.content;
-    document.getElementById("currentFileName").textContent = filename;
-    currentFile = filename;
-    document.getElementById("btnDeleteCurrent").style.display = "block";
-    
-    // Attempt to parse metadata
-    const metaTitle = document.getElementById("metaTitle");
-    const metaAula = document.getElementById("metaAula");
-    metaTitle.value = d.meta?.title || "";
-    metaAula.value = d.meta?.aula || "";
-  }
+  if (!d.ok) return;
+  document.getElementById("ed").value = d.content;
+  document.getElementById("fileName").textContent = filename;
+  document.getElementById("btnDel").style.display = "block";
+  document.getElementById("log").classList.remove("on");
+  file = filename;
+  _mdSig = ""; loadFiles(true);
 }
 
-async function saveMarkdown() {
-  if(!currentFile) {
-    const newName = prompt("Nome do novo arquivo (ex: aula04.md):");
-    if(!newName) return;
-    currentFile = newName.endsWith(".md") ? newName : newName + ".md";
-    document.getElementById("currentFileName").textContent = currentFile;
-    document.getElementById("btnDeleteCurrent").style.display = "block";
+async function saveFile() {
+  if (!proj) return;
+  if (!file) {
+    const n = prompt("Nome do arquivo (ex: aula01.md):");
+    if (!n) return;
+    file = n.endsWith(".md") ? n : n + ".md";
+    document.getElementById("fileName").textContent = file;
+    document.getElementById("btnDel").style.display = "block";
   }
-  
-  const content = document.getElementById("mdEditor").value;
-  const title = document.getElementById("metaTitle").value;
-  const aula = document.getElementById("metaAula").value;
-  
-  let finalContent = content;
-  // Prepend meta if provided
-  if(title || aula) {
-    // Remove existing front-matter if any
-    finalContent = finalContent.replace(/^---\n[\s\S]*?\n---\n/, '');
-    finalContent = `---\ntitle: ${title || currentFile}\naula: ${aula || '01'}\n---\n\n` + finalContent;
-    document.getElementById("mdEditor").value = finalContent; // update UI
-  }
-  
-  const r = await fetch("/api/save", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({filename: currentFile, content: finalContent})
+  const content = document.getElementById("ed").value;
+  const r = await fetch(`/api/save/${encodeURIComponent(proj)}`, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({filename: file, content})
   });
-  
-  if(r.ok) {
-    toast("💾 Salvo com sucesso", "success");
-    loadLists();
-  }
+  if (r.ok) { toast("💾 Salvo","success"); _mdSig=""; loadFiles(true); }
 }
 
 async function deleteCurrentFile() {
-  if(!currentFile) return;
-  if(confirm(`Excluir ${currentFile}?`)) {
-    await deleteFile('md', currentFile);
-    currentFile = null;
-    document.getElementById("currentFileName").textContent = "Nenhum arquivo selecionado";
-    document.getElementById("mdEditor").value = "";
-    document.getElementById("btnDeleteCurrent").style.display = "none";
-  }
+  if (!file || !confirm(`Excluir ${file}?`)) return;
+  await delFile('md', file);
+  file = null;
+  document.getElementById("fileName").textContent = "Nenhum arquivo";
+  document.getElementById("ed").value = "";
+  document.getElementById("btnDel").style.display = "none";
 }
 
-async function deleteFile(type, filename) {
-  const r = await fetch(`/api/delete/${type}/${encodeURIComponent(filename)}`, {method:"DELETE"});
-  if (r.ok) { 
-    toast(`🗑 Removido`, "success"); 
-    loadLists(); 
-  }
+async function delFile(kind, filename) {
+  await fetch(`/api/delete/${encodeURIComponent(proj)}/${kind}/${encodeURIComponent(filename)}`, {method:"DELETE"});
+  _mdSig = _pdfSig = "";
+  loadFiles(true);
+  loadProjects();
+  toast("🗑 Removido");
 }
 
-async function generatePdfFromEditor() {
-  if(!currentFile) {
-    toast("Salve o arquivo primeiro", "error");
-    return;
+async function uploadFile(input, kind) {
+  if (!input.files.length || !proj) return;
+  const fd = new FormData();
+  for (let i=0;i<input.files.length;i++) fd.append("files", input.files[i]);
+  const r = await fetch(`/api/upload/${encodeURIComponent(proj)}/${kind}`, {method:"POST",body:fd});
+  const d = await r.json();
+  if (d.ok) {
+    toast(`✅ ${d.saved} arquivo(s) enviado(s)`,"success");
+    _mdSig=""; loadFiles(true); loadProjects();
+    if (kind==='md' && input.files.length===1) loadFile(input.files[0].name);
   }
-  await saveMarkdown();
-  
-  const logBox = document.getElementById("logBox");
-  logBox.innerHTML = "<div class='info'>⏳ Gerando PDF...</div>";
-  logBox.classList.add("visible");
-  
+  input.value="";
+}
+
+// ══ GERAR PDF ══
+async function generatePDF() {
+  if (!proj) return;
+  if (!file) { toast("Selecione um arquivo primeiro","error"); return; }
+  await saveFile();
+  const btn = document.getElementById("btnGen");
+  btn.innerHTML = '<span class="spinning">⏳</span> Gerando...';
+  btn.disabled = true;
+  const log = document.getElementById("log");
+  log.innerHTML = "⏳ Gerando PDF..."; log.classList.add("on");
   const r = await fetch("/api/generate", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({files: [currentFile]})
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({project: proj, files:[file]})
   });
   const d = await r.json();
-  
-  if(d.ok && d.result && d.result.length > 0) {
-    logBox.innerHTML += `<div class='ok'>✅ Gerado: ${d.result[0]}</div>`;
-    loadLists();
-    toast("✅ PDF Gerado!", "success");
+  btn.innerHTML = "▶ Gerar PDF"; btn.disabled = false;
+  if (d.ok && d.result?.length) {
+    log.innerHTML += `\n<span class="ok">✅ ${d.result[0]} gerado!</span>`;
+    toast("✅ PDF gerado!","success");
+    _pdfSig=""; loadFiles(); loadProjects();
   } else {
-    logBox.innerHTML += `<div class='err'>❌ Erro: Falha ao gerar o PDF. Revise o log do terminal ou verifique se as imagens estão em formato suportado (use JPG/PNG em vez de HEIC).</div>`;
-    toast("❌ Falha ao gerar", "error");
+    log.innerHTML += `\n<span class="err">❌ ${d.error||'Erro ao gerar'}</span>`;
+    toast("❌ Falha ao gerar","error");
   }
 }
 
-function insertAtCursor(text) {
-  const textarea = document.getElementById('mdEditor');
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  textarea.value = textarea.value.substring(0, start) + text + textarea.value.substring(end);
-  textarea.selectionStart = textarea.selectionEnd = start + text.length;
-  textarea.focus();
+// ══ INSERÇÕES ══
+function ins(text) {
+  const t = document.getElementById("ed");
+  const s = t.selectionStart, e = t.selectionEnd;
+  t.value = t.value.substring(0,s) + text + t.value.substring(e);
+  t.selectionStart = t.selectionEnd = s + text.length;
+  t.focus();
 }
-
-function insertBox() {
-  const textarea = document.getElementById('mdEditor');
-  const start = textarea.selectionStart;
-  const end = textarea.selectionEnd;
-  const selectedText = textarea.value.substring(start, end);
-  
-  let newText = "";
-  if (selectedText.trim() === "") {
-    newText = "\\n[BOX]\\nTexto importante aqui.\\n[/BOX]\\n";
-  } else {
-    newText = `\\n[BOX]\\n${selectedText}\\n[/BOX]\\n`;
+function insImg(f) { ins('\n[IMG:' + f + ']\n'); }
+function insertSelectedImages() {
+  const checks = document.querySelectorAll('.img-check:checked');
+  if (checks.length === 0) {
+    toast("Selecione pelo menos uma imagem nas caixinhas", "error");
+    return;
   }
+  const names = Array.from(checks).map(c => c.value).join('|');
+  ins('\n[IMG:' + names + ']\n');
   
-  textarea.value = textarea.value.substring(0, start) + newText + textarea.value.substring(end);
-  textarea.selectionStart = textarea.selectionEnd = start + newText.length;
-  textarea.focus();
+  // Desmarcar depois de inserir
+  checks.forEach(c => c.checked = false);
+}
+function insDivider() { ins('\n---\n'); }
+function insBox() {
+  const t = document.getElementById("ed");
+  const s = t.selectionStart, e = t.selectionEnd;
+  const sel = t.value.substring(s,e).trim() || "Texto importante aqui.";
+  const txt = `\n[BOX]\n${sel}\n[/BOX]\n`;
+  t.value = t.value.substring(0,s) + txt + t.value.substring(e);
+  t.selectionStart = t.selectionEnd = s + txt.length;
+  t.focus();
 }
 
+// ══ TOAST ══
 function toast(msg, type="success") {
   const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.className = `show ${type}`;
-  setTimeout(() => el.className = "", 3000);
+  el.textContent = msg; el.className = `show ${type}`;
+  clearTimeout(_toastT);
+  _toastT = setTimeout(() => el.className="", 3000);
 }
 
-loadLists();
+// ══ AUTO-REFRESH ══
+setInterval(() => { if (proj) loadFiles(true); loadProjects(); }, 5000);
+
+loadProjects();
 </script>
 </body>
 </html>
