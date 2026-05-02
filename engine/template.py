@@ -151,9 +151,12 @@ def _preprocess_image(img_path: str,
 
 # ════════════════════════════════════════
 # ESTILOS (ABNT-compatíveis)
-# ════════════════════════════════════════
 H1  = ParagraphStyle("H1",  fontName=FONT_BOLD, fontSize=16,
                      textColor=NAVY, spaceBefore=18, spaceAfter=8, leading=22)
+MATERIA_STYLE = ParagraphStyle("MATERIA_STYLE", fontName=FONT_BOLD, fontSize=18,
+                     textColor=NAVY, alignment=1)
+TITLE_AULA = ParagraphStyle("TITLE_AULA", fontName=FONT_BOLD, fontSize=18,
+                     textColor=NAVY, alignment=1)
 H2  = ParagraphStyle("H2",  fontName=FONT_BOLD, fontSize=14,
                      textColor=NAVY, spaceBefore=14, spaceAfter=6, leading=19)
 H3  = ParagraphStyle("H3",  fontName=FONT_BOLD, fontSize=12,
@@ -291,13 +294,13 @@ def header_footer(canvas, doc, assets: str):
     canvas.drawRightString(W - 2 * cm, header_y, "Material Didático")
 
     # Linha do rod. e número de página
-    canvas.setStrokeColor(LGRAY)
+    canvas.setStrokeColor(GOLD)
     canvas.setLineWidth(0.8)
     canvas.line(2 * cm, footer_y + 0.4 * cm, W - 2 * cm, footer_y + 0.4 * cm)
 
     canvas.setFillColor(GRAY)
     canvas.setFont(FONT_REG, 10)
-    canvas.drawCentredString(W / 2, footer_y - 0.05 * cm, str(doc.page))
+    canvas.drawRightString(W - 2 * cm, footer_y - 0.05 * cm, str(doc.page + 1))
 
     canvas.restoreState()
 
@@ -305,7 +308,7 @@ def header_footer(canvas, doc, assets: str):
 # ════════════════════════════════════════
 # PARSER MARKDOWN — robusto e auditado
 # ════════════════════════════════════════
-def parse_md(md_path: str, assets: str) -> list:
+def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
     """
     Converte .md em lista de flowables ReportLab.
 
@@ -314,7 +317,16 @@ def parse_md(md_path: str, assets: str) -> list:
       2. <dir do .md>/<nome>       ← fallback: mesmo diretório do arquivo .md
     Se não encontrada em nenhum lugar, a linha [IMG:...] é silenciosamente ignorada.
     """
-    story: list = []
+    if meta is None: meta = {}
+    materia = meta.get("materia", "Disciplina")
+    aula = meta.get("aula", "01")
+    
+    story: list = [
+        Paragraph(materia, MATERIA_STYLE),
+        Spacer(1, 10),
+        Paragraph(f"Aula {aula}", TITLE_AULA),
+        Spacer(1, 24)
+    ]
     in_box = False
     buf: list = []
 
@@ -455,6 +467,7 @@ def extract_meta(md_path: str) -> dict:
     filename = os.path.splitext(os.path.basename(md_path))[0]
     title    = filename
     aula     = "01"
+    materia  = "Disciplina"
 
     num_match = re.search(r'(\d+)', filename)
     if num_match:
@@ -474,14 +487,16 @@ def extract_meta(md_path: str) -> dict:
                     title = val
                 if key == 'aula':
                     aula = str(val).zfill(2)
-        return {"title": title, "aula": aula}
+                if key == 'materia':
+                    materia = val
+        return {"title": title, "aula": aula, "materia": materia}
 
     # Primeiro # Heading
     h1 = re.search(r'^#\s+(.+)', content, re.MULTILINE)
     if h1:
         title = h1.group(1).strip()
 
-    return {"title": title, "aula": aula}
+    return {"title": title, "aula": aula, "materia": materia}
 
 
 # ════════════════════════════════════════
@@ -490,16 +505,16 @@ def extract_meta(md_path: str) -> dict:
 def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
     """
     Build direto ao conteúdo — sem capa.
-    Margens ABNT: Esquerda 3cm | Direita 2cm | Superior 3cm | Inferior 2cm
+    Margens ABNT ajustadas: Superior 3.5cm | Inferior 3.2cm (para evitar sobreposição)
     """
     doc = SimpleDocTemplate(
         output_path, pagesize=A4,
         leftMargin=3 * cm, rightMargin=2 * cm,
-        topMargin=3 * cm, bottomMargin=2 * cm,
+        topMargin=3.5 * cm, bottomMargin=3.2 * cm,
         pageCompression=1
     )
 
-    story = parse_md(md_path, assets_dir)
+    story = parse_md(md_path, assets_dir, meta)
 
     doc.build(
         story,
