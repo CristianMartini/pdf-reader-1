@@ -24,6 +24,7 @@ import sys
 import json
 import re
 import tempfile
+import unicodedata
 from functools import lru_cache
 
 try:
@@ -490,8 +491,12 @@ def extract_meta(md_path: str) -> dict:
         for line in fm.group(1).splitlines():
             if ':' in line:
                 key, _, val = line.partition(':')
-                key, val = key.strip().lower(), val.strip()
-                if key == 'title':
+                key = key.strip().lower()
+                # Remove acentos para facilitar o match (ex: matéria -> materia)
+                key = ''.join(c for c in unicodedata.normalize('NFD', key) if unicodedata.category(c) != 'Mn')
+                val = val.strip()
+                
+                if key in ('title', 'titulo'):
                     title = val
                 if key == 'aula':
                     aula = str(val).zfill(2)
