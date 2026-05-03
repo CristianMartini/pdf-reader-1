@@ -208,6 +208,7 @@ Você deve aderir estritamente a estas regras para garantir aderência às norma
 
 1. TOM E LINGUAGEM EDUCACIONAL
 - O texto deve ser acadêmico, formal, claro e objetivo (nível superior).
+- ORTOGRAFIA IMPECÁVEL: Você deve gerar o texto com a acentuação e pontuação perfeitas do Português do Brasil. Certifique-se de que todas as frases terminem com a pontuação correta (ponto final) e que não haja ausência de acentos (ex: use "Histórico" em vez de "Historico", "Introdução" em vez de "Introducao").
 - PROIBIDO o uso de emojis ou caracteres informais em todo o documento.
 - Foque na retenção de conteúdo: utilize parágrafos curtos, introduções claras e conclusões que reforcem o aprendizado (fixação).
 - Sempre que possível, termine as seções maiores com uma breve síntese ou pergunta reflexiva para fixação.
