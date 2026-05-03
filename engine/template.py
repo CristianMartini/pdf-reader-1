@@ -305,6 +305,14 @@ def header_footer(canvas, doc, assets: str):
     canvas.restoreState()
 
 
+def _format_inline(text: str) -> str:
+    """Converte markdown inline (**bold**, *italic*) para tags do ReportLab."""
+    # Negrito
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # Itálico
+    text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
+    return text
+
 # ════════════════════════════════════════
 # PARSER MARKDOWN — robusto e auditado
 # ════════════════════════════════════════
@@ -357,7 +365,7 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
 
         # BOX fechamento
         if line == "[/BOX]":
-            story.append(Paragraph(" ".join(buf), BOX))
+            story.append(Paragraph(_format_inline(" ".join(buf)), BOX))
             in_box = False
             continue
 
@@ -375,18 +383,18 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
 
         # Headings
         if line.startswith("### "):
-            story.append(Paragraph(line[4:], H3))
+            story.append(Paragraph(_format_inline(line[4:]), H3))
             continue
         if line.startswith("## "):
-            story.append(Paragraph(line[3:], H2))
+            story.append(Paragraph(_format_inline(line[3:]), H2))
             continue
         if line.startswith("# "):
-            story.append(Paragraph(line[2:], H1))
+            story.append(Paragraph(_format_inline(line[2:]), H1))
             continue
 
         # Listas
         if line.startswith("- "):
-            story.append(Paragraph("• " + line[2:], LIST))
+            story.append(Paragraph("• " + _format_inline(line[2:]), LIST))
             continue
 
         # Imagens [IMG:nome.ext] ou [IMG:img1.ext|img2.ext]
@@ -451,7 +459,7 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             continue
 
         # Parágrafo de texto
-        story.append(Paragraph(line, BODY))
+        story.append(Paragraph(_format_inline(line), BODY))
 
     return story
 
