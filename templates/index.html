@@ -193,7 +193,10 @@ function renderMain() {
 
       <div class="card-title">
         <span>🖼️ Imagens</span>
-        <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
+        <div>
+          <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
+          <button class="btn btn-danger btn-sm" onclick="clearImages()" style="margin-left:4px;">🗑 Limpar</button>
+        </div>
         <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
       </div>
       <div class="file-list" id="imgList"></div>
@@ -325,6 +328,20 @@ async function delFile(kind, filename) {
   loadFiles(true);
   loadProjects();
   toast("🗑 Removido");
+}
+
+async function clearImages() {
+  if (!proj) return;
+  if (!confirm('Excluir TODAS as imagens deste projeto?')) return;
+  const r = await fetch(`/api/clear-images/${encodeURIComponent(proj)}`, {method:"DELETE"});
+  const d = await r.json();
+  if (d.ok) {
+    toast("🗑 Todas as imagens removidas");
+    _mdSig = _pdfSig = "";
+    loadFiles(true);
+  } else {
+    toast("❌ Erro ao limpar imagens", "error");
+  }
 }
 
 async function uploadFile(input, kind) {

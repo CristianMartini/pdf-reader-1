@@ -107,8 +107,8 @@ def _logo_mask(path: str):
 
 @lru_cache(maxsize=32)
 def _preprocess_image(img_path: str,
-                      max_px: int = 1400,
-                      quality: int = 80) -> str:
+                      max_px: int = 2400,
+                      quality: int = 95) -> str:
     """
     Redimensiona e converte imagens grandes para JPEG antes de passar ao ReportLab.
     - Imagens <= max_px em ambas as dimensões: retorna o caminho original.
