@@ -342,7 +342,7 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
         raw_content = f.read()
 
     # ── Remover front-matter YAML (--- ... ---) antes de parsear linha a linha ──
-    content = re.sub(r'^---\s*\n.*?\n---\s*\n', '', raw_content, count=1, flags=re.DOTALL)
+    content = re.sub(r'^\s*---\s*\n.*?\n---\s*\n', '', raw_content, count=1, flags=re.DOTALL | re.MULTILINE)
 
     lines = content.splitlines()
 
@@ -484,8 +484,8 @@ def extract_meta(md_path: str) -> dict:
     with open(md_path, encoding="utf-8") as f:
         content = f.read()
 
-    # Front-matter YAML
-    fm = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+    # Front-matter YAML (ignora BOM ou espaços invisíveis no início)
+    fm = re.search(r'^\s*---\s*\n(.*?)\n---\s*\n', content, re.DOTALL | re.MULTILINE)
     if fm:
         for line in fm.group(1).splitlines():
             if ':' in line:
