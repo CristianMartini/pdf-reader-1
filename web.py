@@ -91,7 +91,9 @@ def api_files(project):
     pd = _pdir(project)
     ad = _adir(project)
     mds  = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(pd, "*.md")))]
-    imgs = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(ad, "*.*")))]
+    imgs = [os.path.basename(p) for p in sorted(
+        glob.glob(os.path.join(ad, "*.*")), key=os.path.getmtime, reverse=True
+    )]
     pdfs = [os.path.basename(p) for p in sorted(
         glob.glob(os.path.join(pd, "*.pdf")), key=os.path.getmtime, reverse=True
     )]
@@ -152,6 +154,18 @@ def api_delete_file(project, kind, filename):
         os.remove(path)
         return jsonify(ok=True)
     return jsonify(ok=False, error="Arquivo não encontrado")
+
+
+@app.route("/api/clear-images/<project>", methods=["DELETE"])
+def api_clear_images(project):
+    ad = _adir(project)
+    if os.path.isdir(ad):
+        for f in os.listdir(ad):
+            path = os.path.join(ad, f)
+            if os.path.isfile(path):
+                os.remove(path)
+        return jsonify(ok=True)
+    return jsonify(ok=False, error="Projeto não encontrado")
 
 
 # ════════════════════════════════════════
