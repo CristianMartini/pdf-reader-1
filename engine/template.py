@@ -161,7 +161,7 @@ TITLE_AULA = ParagraphStyle("TITLE_AULA", fontName=FONT_BOLD, fontSize=18,
 H2  = ParagraphStyle("H2",  fontName=FONT_BOLD, fontSize=14,
                      textColor=NAVY, spaceBefore=14, spaceAfter=6, leading=19)
 H3  = ParagraphStyle("H3",  fontName=FONT_BOLD, fontSize=12,
-                     textColor=GRAY, spaceBefore=10, spaceAfter=4, leading=16)
+                     textColor=NAVY, spaceBefore=10, spaceAfter=4, leading=16)
 BODY = ParagraphStyle("BODY", fontName=FONT_REG, fontSize=12,
                       leading=18, textColor=NAVY, spaceAfter=8, alignment=4)
 LIST = ParagraphStyle("LIST", fontName=FONT_REG, fontSize=12,
