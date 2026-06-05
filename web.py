@@ -15,8 +15,12 @@ import glob
 import json
 import shutil
 import traceback
+import time
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
+
+import firebase_admin
+from firebase_admin import credentials, storage
 
 # ── Base ──
 BASE     = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +49,159 @@ app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024  # 64 MB
 os.makedirs(PROJECTS, exist_ok=True)
 
 
+# ── Firebase Initialization ──
+firebase_app = None
+bucket = None
+LAST_SYNCED = {}
+
+def init_firebase():
+    global firebase_app, bucket
+    if firebase_admin._apps:
+        firebase_app = firebase_admin.get_app()
+        try:
+            bucket = storage.bucket(app=firebase_app)
+        except Exception:
+            pass
+    else:
+        cred = None
+        service_key_path = os.path.join(BASE, "serviceAccountKey.json")
+        
+        # 1. Try local serviceAccountKey.json
+        if os.path.exists(service_key_path):
+            try:
+                cred = credentials.Certificate(service_key_path)
+                print("🔥 Firebase: Carregando chave de serviceAccountKey.json")
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao ler serviceAccountKey.json: {e}")
+                
+        # 2. Try Vercel environment variable
+        elif os.environ.get("FIREBASE_CREDENTIALS"):
+            try:
+                cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
+                cred = credentials.Certificate(cred_json)
+                print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS")
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao ler FIREBASE_CREDENTIALS env: {e}")
+                
+        if cred:
+            try:
+                project_id = None
+                if os.path.exists(service_key_path):
+                    with open(service_key_path, "r", encoding="utf-8") as f:
+                        project_id = json.load(f).get("project_id")
+                elif os.environ.get("FIREBASE_CREDENTIALS"):
+                    project_id = json.loads(os.environ.get("FIREBASE_CREDENTIALS")).get("project_id")
+                
+                bucket_name = f"{project_id}.appspot.com" if project_id else None
+                if bucket_name:
+                    firebase_app = firebase_admin.initialize_app(cred, {
+                        'storageBucket': bucket_name
+                    })
+                    bucket = storage.bucket(app=firebase_app)
+                    print(f"🔥 Firebase: Inicializado com sucesso para o bucket {bucket_name}")
+                else:
+                    print("❌ Firebase: project_id não encontrado nos arquivos de credencial")
+            except Exception as e:
+                print(f"❌ Firebase: Falha na inicialização: {e}")
+        else:
+            print("⚠️ Firebase: Nenhuma credencial encontrada. Rodando apenas em modo local.")
+
+init_firebase()
+
+
+def firebase_list_projects() -> list[str]:
+    if not bucket:
+        return []
+    try:
+        blobs = bucket.list_blobs(prefix="projects/", delimiter="/")
+        list(blobs) # Consume list to populate prefixes
+        prefixes = blobs.prefixes
+        projects = []
+        for p in prefixes:
+            name = p.split("/")[-2]
+            if name:
+                projects.append(name)
+        return projects
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao listar projetos: {e}")
+        return []
+
+
+def _sync_project_from_firebase(project_name: str, force: bool = False):
+    if not bucket:
+        return
+        
+    now = time.time()
+    last = LAST_SYNCED.get(project_name, 0)
+    
+    if not force and (now - last < 30):
+        return
+        
+    try:
+        prefix = f"projects/{project_name}/"
+        blobs = bucket.list_blobs(prefix=prefix)
+        local_proj_dir = os.path.join(PROJECTS, project_name)
+        
+        for blob in blobs:
+            if blob.name.endswith('/'):
+                continue
+            
+            rel_path = os.path.relpath(blob.name, f"projects/{project_name}")
+            local_file_path = os.path.join(local_proj_dir, rel_path)
+            
+            if os.path.exists(local_file_path):
+                local_size = os.path.getsize(local_file_path)
+                if local_size == blob.size:
+                    continue # Already in sync
+                    
+            os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+            blob.download_to_filename(local_file_path)
+            print(f"📥 Firebase: Sincronizado {blob.name} -> {local_file_path}")
+            
+        LAST_SYNCED[project_name] = now
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao sincronizar projeto {project_name}: {e}")
+
+
+def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = False):
+    if not bucket:
+        return
+        
+    try:
+        local_proj_dir = os.path.join(PROJECTS, project_name)
+        if is_asset:
+            local_path = os.path.join(local_proj_dir, "assets", filename)
+            blob_path = f"projects/{project_name}/assets/{filename}"
+        else:
+            local_path = os.path.join(local_proj_dir, filename)
+            blob_path = f"projects/{project_name}/{filename}"
+            
+        if os.path.isfile(local_path):
+            blob = bucket.blob(blob_path)
+            blob.upload_from_filename(local_path)
+            print(f"📤 Firebase: Upload concluído para {blob_path}")
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao fazer upload de {filename}: {e}")
+
+
+def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
+    if not bucket:
+        return
+        
+    try:
+        if kind == "img":
+            blob_path = f"projects/{project_name}/assets/{filename}"
+        else:
+            blob_path = f"projects/{project_name}/{filename}"
+            
+        blob = bucket.blob(blob_path)
+        if blob.exists():
+            blob.delete()
+            print(f"🗑️ Firebase: Excluído {blob_path}")
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao excluir {filename} do Firebase: {e}")
+
+
 # ── Helpers ──
 def _pdir(project: str) -> str:
     return os.path.join(PROJECTS, secure_filename(project))
@@ -67,12 +224,27 @@ def index():
 @app.route("/api/projects", methods=["GET"])
 def api_list_projects():
     items = []
+    project_names = set()
+    
+    # 1. Get local projects
     if os.path.isdir(PROJECTS):
-        for entry in sorted(os.scandir(PROJECTS), key=lambda e: e.name):
-            if entry.is_dir():
-                mds  = len(glob.glob(os.path.join(entry.path, "*.md")))
-                pdfs = len(glob.glob(os.path.join(entry.path, "*.pdf")))
-                items.append({"name": entry.name, "mds": mds, "pdfs": pdfs})
+        for entry in os.scandir(PROJECTS):
+            if entry.is_dir() and not entry.name.startswith("."):
+                project_names.add(entry.name)
+                
+    # 2. Get remote Firebase projects
+    remote_projs = firebase_list_projects()
+    for name in remote_projs:
+        project_names.add(name)
+        
+    for name in sorted(project_names):
+        # Sincroniza do Firebase antes de ler a contagem de mds e pdfs
+        _sync_project_from_firebase(name)
+        pd = _pdir(name)
+        mds  = len(glob.glob(os.path.join(pd, "*.md")))
+        pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
+        items.append({"name": name, "mds": mds, "pdfs": pdfs})
+        
     return jsonify(projects=items)
 
 
@@ -104,6 +276,8 @@ def api_delete_project(project):
 # ════════════════════════════════════════
 @app.route("/api/files/<project>")
 def api_files(project):
+    # Sincroniza do Firebase antes de carregar arquivos
+    _sync_project_from_firebase(project)
     pd = _pdir(project)
     ad = _adir(project)
     mds  = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(pd, "*.md")))]
@@ -118,6 +292,8 @@ def api_files(project):
 
 @app.route("/api/file/<project>/<filename>")
 def api_get_file(project, filename):
+    # Força sincronização do arquivo individual caso tenha atualizado remoto
+    _sync_project_from_firebase(project)
     path = os.path.join(_pdir(project), secure_filename(filename))
     if not os.path.isfile(path):
         return jsonify(ok=False, error="Arquivo não encontrado")
@@ -139,6 +315,8 @@ def api_save(project):
     os.makedirs(pd, exist_ok=True)
     with open(os.path.join(pd, filename), "w", encoding="utf-8") as f:
         f.write(content)
+    # Upload para o Firebase
+    _upload_file_to_firebase(project, filename, is_asset=False)
     return jsonify(ok=True)
 
 
@@ -150,7 +328,10 @@ def api_upload(project, kind):
     saved = 0
     for f in files:
         if f.filename:
-            f.save(os.path.join(dest_dir, secure_filename(f.filename)))
+            safe_name = secure_filename(f.filename)
+            f.save(os.path.join(dest_dir, safe_name))
+            # Upload para o Firebase
+            _upload_file_to_firebase(project, safe_name, is_asset=(kind != "md"))
             saved += 1
     return jsonify(ok=True, saved=saved)
 
@@ -168,6 +349,8 @@ def api_delete_file(project, kind, filename):
         return jsonify(ok=False, error="Tipo inválido")
     if os.path.isfile(path):
         os.remove(path)
+        # Excluir do Firebase
+        _delete_file_from_firebase(project, filename, kind)
         return jsonify(ok=True)
     return jsonify(ok=False, error="Arquivo não encontrado")
 
@@ -180,6 +363,8 @@ def api_clear_images(project):
             path = os.path.join(ad, f)
             if os.path.isfile(path):
                 os.remove(path)
+                # Excluir cada imagem do Firebase
+                _delete_file_from_firebase(project, f, "img")
         return jsonify(ok=True)
     return jsonify(ok=False, error="Projeto não encontrado")
 
@@ -207,10 +392,13 @@ def api_generate():
     try:
         for fname in files:
             md_path     = os.path.join(pd, secure_filename(fname))
-            output_path = os.path.join(pd, os.path.splitext(fname)[0] + ".pdf")
+            pdf_name    = os.path.splitext(fname)[0] + ".pdf"
+            output_path = os.path.join(pd, pdf_name)
             if os.path.isfile(md_path):
                 meta = extract_meta(md_path)
                 build_from_md(md_path, output_path, assets_dir=ad, meta=meta)
+                # Upload do PDF gerado para o Firebase
+                _upload_file_to_firebase(project, pdf_name, is_asset=False)
                 results.append(os.path.basename(output_path))
         return jsonify(ok=True, result=results)
     except Exception as e:
@@ -360,6 +548,9 @@ def api_queue_process(project):
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "w", encoding="utf-8") as f:
             f.write(rewritten_markdown)
+            
+        # Upload do novo markdown gerado pela IA para o Firebase
+        _upload_file_to_firebase(project, dest_filename, is_asset=False)
             
         # 4. Remover arquivo temporário
         try:
