@@ -18,7 +18,9 @@ materia: Nome da Disciplina ou Curso
 
 ### 3. HIERARQUIA E FORMATAÇÃO (PADRÃO ABNT)
 - **Título Principal (Único)**: `# Título Principal da Aula` (logo após o front-matter).
-- **Subtítulos**: Use `## Título de Seção` e `### Subtópico Específico`.
+- **Subtítulos**: Use `## Título de Seção`, `### Subtópico Específico` ou `#### Subtópico Menor`.
+- **Isolamento de Títulos**: Todos os títulos/subtítulos (`#`, `##`, `###`, `####`, etc.) DEVEM ser escritos em sua própria linha isolada. É terminantemente proibido que o parágrafo ou o texto comece na mesma linha do título.
+- **Quebras de Linha**: Insira exatamente UMA linha em branco (uma quebra de linha dupla) após cada título/subtítulo, antes de iniciar o parágrafo seguinte.
 - **Parágrafos**: Sem recuo manual na primeira linha. Separe parágrafos com exatamente UMA linha em branco. O alinhamento será justificado automaticamente pela engine.
 - **Listas**: Use exclusivamente o traço padrão: `- Item da lista`.
 
@@ -32,10 +34,11 @@ Sintaxe isolada:
 ### 5. INSERÇÃO ESTRATÉGICA DE IMAGENS (SINTAXE EXCLUSIVA)
 - **PROIBIDO** o uso da sintaxe markdown padrão `![alt](url)`.
 - Use EXCLUSIVAMENTE a sintaxe `[IMG:nome_do_arquivo.extensao]` em linhas isoladas.
+- **PROIBIÇÃO DE LEGENDAS AUTOMÁTICAS**: NUNCA escreva ou gere qualquer texto de legenda, descrição ou nota explicativa (por exemplo, textos em itálico como `*Ilustração de...*` ou `*Legenda...*`) abaixo ou acima da tag `[IMG:...]`. Deixe apenas a tag de imagem isolada em sua própria linha. O usuário irá inserir as legendas manualmente se desejar.
 - Insira tags sugestivas onde um infográfico, diagrama ou esquema visual aumentaria significativamente a compreensão (ex: `[IMG:fluxo_processo.jpg]`).
-- Exemplo de imagem única:
+- Exemplo de imagem única (em linha isolada, sem qualquer texto embaixo):
   [IMG:esquema_visual.jpg]
-- Exemplo de imagem dupla (lado a lado):
+- Exemplo de imagem dupla (lado a lado, em linha isolada, sem qualquer texto embaixo):
   [IMG:antes.jpg|depois.jpg]
 
 ### 6. ESTRUTURA DE SEPARADORES
