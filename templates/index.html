@@ -1015,11 +1015,6 @@ async function reprocessQueueItem(idx) {
   const item = uploadQueue[idx];
   await processQueueItem(item);
 }
-  
-  renderQueue();
-  _mdSig = "";
-  loadFiles(true);
-}
 
 // ══ AUTO-REFRESH ══
 setInterval(() => { if (proj) loadFiles(true); loadProjects(); }, 5000);
