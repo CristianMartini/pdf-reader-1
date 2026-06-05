@@ -162,6 +162,10 @@ H2  = ParagraphStyle("H2",  fontName=FONT_BOLD, fontSize=14,
                      textColor=NAVY, spaceBefore=14, spaceAfter=6, leading=19)
 H3  = ParagraphStyle("H3",  fontName=FONT_BOLD, fontSize=12,
                      textColor=NAVY, spaceBefore=10, spaceAfter=4, leading=16)
+H4  = ParagraphStyle("H4",  fontName=FONT_BOLD, fontSize=11.5,
+                     textColor=NAVY, spaceBefore=8, spaceAfter=3, leading=15)
+H5  = ParagraphStyle("H5",  fontName=FONT_BOLD, fontSize=10.5,
+                     textColor=NAVY, spaceBefore=6, spaceAfter=2, leading=14)
 BODY = ParagraphStyle("BODY", fontName=FONT_REG, fontSize=12,
                       leading=18, textColor=NAVY, spaceAfter=8, alignment=4)
 LIST = ParagraphStyle("LIST", fontName=FONT_REG, fontSize=12,
@@ -357,15 +361,16 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             continue
 
         line = line.strip()
+        clean_line = line.replace("`", "").strip()
 
         # BOX abertura
-        if line == "[BOX]":
+        if clean_line == "[BOX]":
             in_box = True
             buf = []
             continue
 
         # BOX fechamento
-        if line == "[/BOX]":
+        if clean_line == "[/BOX]":
             story.append(Paragraph(_format_inline(" ".join(buf)), BOX))
             in_box = False
             continue
@@ -383,6 +388,12 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             continue
 
         # Headings
+        if line.startswith("##### "):
+            story.append(Paragraph(_format_inline(line[6:]), H5))
+            continue
+        if line.startswith("#### "):
+            story.append(Paragraph(_format_inline(line[5:]), H4))
+            continue
         if line.startswith("### "):
             story.append(Paragraph(_format_inline(line[4:]), H3))
             continue

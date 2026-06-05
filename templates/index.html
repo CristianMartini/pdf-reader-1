@@ -81,6 +81,60 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 
 .spinning{display:inline-block;animation:spin 1s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* Estilos de Item de Imagem */
+.img-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+.img-item:hover {
+  border-color: var(--navy);
+  box-shadow: 0 2px 6px rgba(1, 22, 65, 0.08);
+}
+.img-item .img-icon {
+  width: 36px; height: 36px; border-radius: 6px;
+  border: 1px solid var(--border); background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 1.2rem;
+}
+/* Preview flutuante global — position:fixed nunca é cortado por overflow */
+#imgFloatPreview {
+  position: fixed;
+  width: 260px;
+  max-height: 260px;
+  background: #fff;
+  border: 2px solid var(--navy);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(1, 22, 65, 0.22);
+  z-index: 9999;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  display: flex;
+  flex-direction: column;
+}
+#imgFloatPreview.visible { opacity: 1; }
+#imgFloatPreview img {
+  width: 100%; max-height: 220px;
+  object-fit: contain;
+  background: #f1f5f9;
+  border-radius: 8px 8px 0 0;
+}
+#imgFloatPreview .preview-label {
+  padding: 4px 8px; font-size: .72rem;
+  color: var(--navy); text-align: center;
+  background: #f8fafc; border-top: 1px solid var(--border);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 </style>
 </head>
 <body>
@@ -122,11 +176,19 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 
 <div id="toast"></div>
 
+<!-- Preview flutuante de imagem (position:fixed, fora de qualquer container) -->
+<div id="imgFloatPreview">
+  <img src="" alt="Preview">
+  <div class="preview-label"></div>
+</div>
+
 <script>
 let proj = null;   // projeto ativo
 let file = null;   // arquivo ativo
-let _mdSig = "", _pdfSig = "";
+let _mdSig = "", _pdfSig = "", _imgSig = "";
 let _toastT = null;
+let uploadQueue = []; // Fila de uploads para IA
+let isProcessingQueue = false;
 
 // ══ PROJETOS ══
 async function loadProjects() {
@@ -173,47 +235,100 @@ function renderEmpty() {
 
 // ══ SELECIONAR PROJETO ══
 function selectProject(name) {
-  proj = name; file = null; _mdSig = ""; _pdfSig = "";
+  proj = name; file = null; _mdSig = ""; _pdfSig = ""; _imgSig = "";
+  uploadQueue = []; // Limpa fila ao trocar de projeto
+  isProcessingQueue = false;
   loadProjects();
   renderMain();
 }
 
 function renderMain() {
   document.getElementById("mainArea").innerHTML = `
-    <!-- Arquivos -->
-    <div class="card">
-      <div class="card-title">
-        <span>📄 Documentos</span>
-        <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdUp').click()">＋ Upload .md</button>
-        <input type="file" id="mdUp" accept=".md" style="display:none" onchange="uploadFile(this,'md')">
-      </div>
-      <div class="file-list" id="mdList"></div>
-
-      <hr style="border:none;border-top:1px solid var(--border);margin:1rem 0;">
-
-      <div class="card-title">
-        <span>🖼️ Imagens</span>
-        <div>
-          <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
-          <button class="btn btn-danger btn-sm" onclick="clearImages()" style="margin-left:4px;">🗑 Limpar</button>
+    <!-- COLUNA DA ESQUERDA: FLUXO DE ARQUIVOS (PASSO 1, 2 E 3) -->
+    <div style="display: flex; flex-direction: column; gap: 1.2rem;">
+      
+      <!-- CARD PASSO 1: IMPORTADOR EM LOTE COM IA -->
+      <div class="card">
+        <div class="card-title">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 1</span>
+            <span>🤖 Importar Aulas (Lote/IA)</span>
+          </div>
         </div>
-        <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
+        <p class="muted" style="margin-bottom:.8rem; line-height: 1.4;">
+          Suba múltiplos arquivos <b>.pdf</b> ou <b>.md</b> antigos. A IA extrairá o texto e reescreverá no padrão Evolux.
+        </p>
+        
+        <div style="border: 2px dashed var(--border); padding: 1.2rem; text-align: center; border-radius: 8px; cursor: pointer; transition: border-color .15s;" 
+             id="dropZone"
+             onclick="document.getElementById('queueUp').click()"
+             onmouseover="this.style.borderColor='var(--gold)'"
+             onmouseout="this.style.borderColor='var(--border)'">
+          <span style="font-size: 1.5rem; display: block; margin-bottom: 4px;">📤</span>
+          <span style="font-size: .85rem; font-weight: 600; color: var(--navy);">Selecionar arquivos .pdf ou .md</span>
+          <input type="file" id="queueUp" accept=".md,.pdf" multiple style="display:none" onchange="addFilesToQueue(this)">
+        </div>
+        
+        <div id="queueSection" style="display:none; margin-top: 1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="queueCheckAll" checked style="cursor:pointer; width:16px; height:16px;" onchange="toggleSelectAllQueue(this.checked)">
+              <span style="font-size:.82rem; font-weight:700; color:var(--navy);">Fila (<span id="queueCount">0</span>)</span>
+            </div>
+            <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()">▶ Processar Selecionados</button>
+          </div>
+          <div class="file-list" id="queueList" style="max-height: 200px;"></div>
+        </div>
       </div>
-      <div class="file-list" id="imgList"></div>
-      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-        <button class="btn btn-gold btn-sm" onclick="insertSelectedImages()">▶ Inserir Selecionadas Juntas</button>
+
+      <!-- CARD PASSO 2: DOCUMENTOS -->
+      <div class="card">
+        <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 2</span>
+            <span>📄 Selecionar Documento</span>
+          </div>
+          <div>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdUp').click()">＋ Upload .md</button>
+            <input type="file" id="mdUp" accept=".md" style="display:none" onchange="uploadFile(this,'md')">
+          </div>
+        </div>
+        <p class="muted" style="margin-bottom:.6rem;">Selecione um arquivo Markdown abaixo para carregar no editor.</p>
+        <div class="file-list" id="mdList" style="max-height: 180px;"></div>
       </div>
-      <p class="muted" style="margin-top:6px; line-height: 1.4;">
-        Clique no nome para inserir 1 imagem sozinha, ou marque as caixas e clique no botão acima para agrupá-las lado a lado.
-      </p>
+
+      <!-- CARD PASSO 3: IMAGENS -->
+      <div class="card">
+        <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 3</span>
+            <span>🖼️ Inserir Imagens</span>
+          </div>
+          <div>
+            <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
+            <button class="btn btn-danger btn-sm" onclick="clearImages()" style="margin-left:4px;">🗑 Limpar</button>
+            <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
+          </div>
+        </div>
+        <p class="muted" style="margin-bottom:.6rem;">Clique para inserir no cursor do editor ou selecione caixas para agrupar.</p>
+        <div class="file-list" id="imgList" style="max-height: 180px;"></div>
+        <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+          <button class="btn btn-gold btn-sm" onclick="insertSelectedImages()" style="width: 100%; justify-content: center;">▶ Inserir Selecionadas Juntas</button>
+        </div>
+      </div>
+
     </div>
 
-    <!-- Editor -->
-    <div class="card">
-      <div class="card-title">
-        <span>✍️ Editor</span>
+    <!-- COLUNA DA DIREITA: EDITOR E CRIAÇÃO (PASSO 4) -->
+    <div class="card" style="display: flex; flex-direction: column; gap: 0.8rem; height: 100%;">
+      <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 0;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 4</span>
+          <span>✍️ Editor de Conteúdo</span>
+        </div>
         <span id="fileName" style="font-size:.82rem;color:var(--muted);font-weight:normal;">Nenhum arquivo</span>
       </div>
+      
       <div class="toolbar">
         <button class="btn btn-ghost btn-sm" onclick="ins('# ')">H1</button>
         <button class="btn btn-ghost btn-sm" onclick="ins('## ')">H2</button>
@@ -224,19 +339,25 @@ function renderMain() {
         <button class="btn btn-ghost btn-sm" onclick="insImg('img1.jpg|img2.jpg')">2 Imagens</button>
         <button class="btn btn-ghost btn-sm" onclick="insDivider()">Divisor</button>
       </div>
-      <textarea id="ed" placeholder="Selecione um arquivo ou comece a escrever...&#10;&#10;Use front-matter:&#10;---&#10;title: Título da Aula&#10;aula: 01&#10;---"></textarea>
+      
+      <textarea id="ed" style="flex: 1; min-height: 520px;" placeholder="Selecione um arquivo ou comece a escrever...&#10;&#10;Use front-matter:&#10;---&#10;title: Título da Aula&#10;aula: 01&#10;---"></textarea>
+      
       <div class="actions">
         <button class="btn btn-primary" onclick="saveFile()">💾 Salvar</button>
         <button class="btn btn-gold" id="btnGen" onclick="generatePDF()">▶ Gerar PDF</button>
         <button class="btn btn-danger" id="btnDel" onclick="deleteCurrentFile()" style="display:none;margin-left:auto;">🗑 Excluir</button>
       </div>
+      
       <div class="log" id="log"></div>
     </div>
 
-    <!-- PDFs -->
+    <!-- SEÇÃO INFERIOR: PDFs GERADOS (PASSO 5) -->
     <div class="card full">
       <div class="card-title">
-        <span>📑 PDFs Gerados</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 5</span>
+          <span>📑 PDFs Gerados (Padrão Evolux)</span>
+        </div>
         <span id="pdfCount" style="font-size:.8rem;color:var(--muted);font-weight:normal;"></span>
       </div>
       <div id="pdfList" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
@@ -261,12 +382,26 @@ async function loadFiles(silent=false) {
       </div>`).join("") || '<p class="muted">Nenhum documento</p>';
   }
 
-  document.getElementById("imgList").innerHTML = d.imgs.map(f => `
-    <div class="img-item">
-      <input type="checkbox" class="img-check" value="${f}" style="cursor:pointer; width:16px; height:16px;">
-      <span class="f-name" style="cursor:pointer" onclick="insImg('${f}')" title="Inserir 1 imagem">🖼️ ${f}</span>
-      <button class="btn btn-ghost btn-sm" onclick="delFile('img','${f}')">🗑</button>
-    </div>`).join("") || '<p class="muted">Nenhuma imagem</p>';
+  const imgSig = JSON.stringify(d.imgs);
+  if (imgSig !== _imgSig) {
+    _imgSig = imgSig;
+    document.getElementById("imgList").innerHTML = d.imgs.map(f => {
+      const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+      return `
+        <div class="img-item"
+             data-img-url="/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}"
+             data-img-name="${f}"
+             onmouseenter="showImgPreview(event, this)"
+             onmousemove="moveImgPreview(event)"
+             onmouseleave="hideImgPreview()">
+          <input type="checkbox" class="img-check" value="${f}" style="cursor:pointer; width:16px; height:16px; flex-shrink:0;" onclick="event.stopPropagation()">
+          <div class="img-icon" onclick="insImg('${safeF}')">🖼️</div>
+          <span class="f-name" style="cursor:pointer; flex:1; word-break:break-all; font-size:.82rem; font-weight:500;" onclick="insImg('${safeF}')" title="Inserir no editor">${f}</span>
+          <button class="btn btn-ghost btn-sm" style="flex-shrink:0; padding:2px 6px;" onclick="event.stopPropagation(); delFile('img','${safeF}')">🗑</button>
+        </div>
+      `;
+    }).join("") || '<p class="muted">Nenhuma imagem</p>';
+  }
 
   const pdfSig = JSON.stringify(d.pdfs);
   if (pdfSig !== _pdfSig) {
@@ -324,7 +459,7 @@ async function deleteCurrentFile() {
 
 async function delFile(kind, filename) {
   await fetch(`/api/delete/${encodeURIComponent(proj)}/${kind}/${encodeURIComponent(filename)}`, {method:"DELETE"});
-  _mdSig = _pdfSig = "";
+  _mdSig = _pdfSig = _imgSig = "";
   loadFiles(true);
   loadProjects();
   toast("🗑 Removido");
@@ -337,7 +472,7 @@ async function clearImages() {
   const d = await r.json();
   if (d.ok) {
     toast("🗑 Todas as imagens removidas");
-    _mdSig = _pdfSig = "";
+    _mdSig = _pdfSig = _imgSig = "";
     loadFiles(true);
   } else {
     toast("❌ Erro ao limpar imagens", "error");
@@ -352,7 +487,7 @@ async function uploadFile(input, kind) {
   const d = await r.json();
   if (d.ok) {
     toast(`✅ ${d.saved} arquivo(s) enviado(s)`,"success");
-    _mdSig=""; loadFiles(true); loadProjects();
+    _mdSig = _imgSig = ""; loadFiles(true); loadProjects();
     if (kind==='md' && input.files.length===1) loadFile(input.files[0].name);
   }
   input.value="";
@@ -392,7 +527,50 @@ function ins(text) {
   t.selectionStart = t.selectionEnd = s + text.length;
   t.focus();
 }
-function insImg(f) { ins('\n[IMG:' + f + ']\n'); }
+
+// ══ PREVIEW FLUTUANTE DE IMAGEM ══
+function showImgPreview(ev, el) {
+  const prev = document.getElementById('imgFloatPreview');
+  const url = el.dataset.imgUrl;
+  const name = el.dataset.imgName;
+  const img = prev.querySelector('img');
+  const label = prev.querySelector('.preview-label');
+  img.src = url;
+  label.textContent = name;
+  // Posicionar perto do mouse
+  const x = Math.min(ev.clientX + 16, window.innerWidth - 280);
+  const y = Math.max(ev.clientY - 270, 10);
+  prev.style.left = x + 'px';
+  prev.style.top = y + 'px';
+  prev.classList.add('visible');
+}
+function moveImgPreview(ev) {
+  const prev = document.getElementById('imgFloatPreview');
+  const x = Math.min(ev.clientX + 16, window.innerWidth - 280);
+  const y = Math.max(ev.clientY - 270, 10);
+  prev.style.left = x + 'px';
+  prev.style.top = y + 'px';
+}
+function hideImgPreview() {
+  document.getElementById('imgFloatPreview').classList.remove('visible');
+}
+
+function insImg(f) {
+  const t = document.getElementById("ed");
+  const s = t.selectionStart, e = t.selectionEnd;
+  const selText = t.value.substring(s, e);
+  
+  if (s !== e && /\[IMG:[^\]]+\]/.test(selText)) {
+    const newText = selText.replace(/\[IMG:[^\]]+\]/, `[IMG:${f}]`);
+    t.value = t.value.substring(0, s) + newText + t.value.substring(e);
+    t.selectionStart = s;
+    t.selectionEnd = s + newText.length;
+    t.focus();
+    toast("🖼️ Imagem substituída na tag mantendo a legenda", "success");
+  } else {
+    ins('\n[IMG:' + f + ']\n');
+  }
+}
 function insertSelectedImages() {
   const checks = document.querySelectorAll('.img-check:checked');
   if (checks.length === 0) {
@@ -400,7 +578,21 @@ function insertSelectedImages() {
     return;
   }
   const names = Array.from(checks).map(c => c.value).join('|');
-  ins('\n[IMG:' + names + ']\n');
+  
+  const t = document.getElementById("ed");
+  const s = t.selectionStart, e = t.selectionEnd;
+  const selText = t.value.substring(s, e);
+  
+  if (s !== e && /\[IMG:[^\]]+\]/.test(selText)) {
+    const newText = selText.replace(/\[IMG:[^\]]+\]/, `[IMG:${names}]`);
+    t.value = t.value.substring(0, s) + newText + t.value.substring(e);
+    t.selectionStart = s;
+    t.selectionEnd = s + newText.length;
+    t.focus();
+    toast("🖼️ Imagens substituídas na tag mantendo a legenda", "success");
+  } else {
+    ins('\n[IMG:' + names + ']\n');
+  }
   
   // Desmarcar depois de inserir
   checks.forEach(c => c.checked = false);
@@ -422,6 +614,261 @@ function toast(msg, type="success") {
   el.textContent = msg; el.className = `show ${type}`;
   clearTimeout(_toastT);
   _toastT = setTimeout(() => el.className="", 3000);
+}
+
+// ══ FILA DE PROCESSAMENTO COM IA ══
+async function addFilesToQueue(input) {
+  if (!input.files.length || !proj) return;
+  
+  const fd = new FormData();
+  for (let i = 0; i < input.files.length; i++) {
+    fd.append("files", input.files[i]);
+  }
+  
+  toast("Enviando arquivos para a fila...", "success");
+  
+  try {
+    const r = await fetch(`/api/queue/upload/${encodeURIComponent(proj)}`, {
+      method: "POST",
+      body: fd
+    });
+    const d = await r.json();
+    
+    if (d.ok) {
+      d.files.forEach(f => {
+        uploadQueue.push({
+          name: f.name,
+          safe_name: f.safe_name,
+          type: f.type,
+          status: "pending",
+          error: null,
+          saved_as: null,
+          checked: true
+        });
+      });
+      toast(`✅ ${d.files.length} arquivos na fila`, "success");
+      renderQueue();
+    } else {
+      toast("❌ Erro ao adicionar arquivos: " + d.error, "error");
+    }
+  } catch (err) {
+    toast("❌ Falha de rede no upload", "error");
+  }
+  
+  input.value = "";
+}
+
+function renderQueue() {
+  const sec = document.getElementById("queueSection");
+  const list = document.getElementById("queueList");
+  const count = document.getElementById("queueCount");
+  
+  if (!sec || !list || !count) return;
+  
+  if (uploadQueue.length === 0) {
+    sec.style.display = "none";
+    return;
+  }
+  
+  sec.style.display = "block";
+  count.textContent = uploadQueue.length;
+  
+  list.innerHTML = uploadQueue.map((item, idx) => {
+    let statusBadge = "";
+    let btnOpen = "";
+    let btnReprocess = "";
+    let checkbox = "";
+    
+    if (item.status === "pending" || item.status === "failed") {
+      checkbox = `<input type="checkbox" class="queue-check" ${item.checked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px;" onchange="toggleQueueItemChecked(${idx}, this.checked)" ${isProcessingQueue ? 'disabled' : ''}>`;
+    } else {
+      checkbox = `<div style="width:16px; height:16px;"></div>`;
+    }
+    
+    if (item.status === "pending") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dde3f0; color:var(--text);">Pendente</span>`;
+    } else if (item.status === "processing") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#f9d549; color:var(--navy);"><span class="spinning">⏳</span> ${item.status_msg || 'Processando...'}</span>`;
+    } else if (item.status === "completed") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dcfce7; color:#15803d;">Pronto</span>`;
+      btnOpen = `<button class="btn btn-primary btn-sm" style="padding:2px 6px; font-size:.75rem;" onclick="loadFile('${item.saved_as}')">Editar</button>`;
+      btnReprocess = `<button class="btn btn-ghost btn-sm" style="padding:2px 6px; color:var(--gold); border-color:var(--gold);" onclick="reprocessQueueItem(${idx})" title="Reprocessar arquivo individual" ${isProcessingQueue ? 'disabled' : ''}>🔄</button>`;
+    } else if (item.status === "failed") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#fee2e2; color:#b91c1c;" title="${item.error || 'Erro desconhecido'}">Falha</span>`;
+      btnReprocess = `<button class="btn btn-ghost btn-sm" style="padding:2px 6px; color:var(--gold); border-color:var(--gold);" onclick="reprocessQueueItem(${idx})" title="Reprocessar arquivo individual" ${isProcessingQueue ? 'disabled' : ''}>🔄</button>`;
+    }
+    
+    return `
+      <div class="file-item" style="justify-content:space-between; gap:10px; align-items:center;">
+        <div style="display:flex; align-items:center; gap:8px; flex:1;">
+          ${checkbox}
+          <div style="display:flex; flex-direction:column; gap:2px; flex:1;">
+            <span style="font-weight:600; word-break:break-all;">${item.type === 'pdf' ? '📑' : '📄'} ${item.name}</span>
+            ${item.error ? `<span style="font-size:.72rem; color:var(--red); font-weight:normal;">${item.error}</span>` : ""}
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          ${statusBadge}
+          ${btnOpen}
+          ${btnReprocess}
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;" onclick="removeFromQueue(${idx})" ${isProcessingQueue ? 'disabled' : ''}>🗑</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function toggleQueueItemChecked(idx, checked) {
+  uploadQueue[idx].checked = checked;
+  if (!checked) {
+    const el = document.getElementById("queueCheckAll");
+    if (el) el.checked = false;
+  }
+}
+
+function toggleSelectAllQueue(checked) {
+  uploadQueue.forEach(item => {
+    if (item.status === "pending" || item.status === "failed") {
+      item.checked = checked;
+    }
+  });
+  renderQueue();
+}
+
+function removeFromQueue(idx) {
+  if (isProcessingQueue) return;
+  uploadQueue.splice(idx, 1);
+  renderQueue();
+}
+
+async function processQueue() {
+  if (isProcessingQueue || uploadQueue.length === 0) return;
+  
+  const targets = uploadQueue.filter(item => item.checked && (item.status === "pending" || item.status === "failed"));
+  if (targets.length === 0) {
+    toast("Selecione pelo menos um arquivo pendente para processar", "error");
+    return;
+  }
+  
+  isProcessingQueue = true;
+  const btn = document.getElementById("btnProcessQueue");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinning">⏳</span> Processando...';
+  
+  for (let i = 0; i < uploadQueue.length; i++) {
+    const item = uploadQueue[i];
+    if (item.checked && (item.status === "pending" || item.status === "failed")) {
+      item.status = "processing";
+      item.status_msg = "Lendo arquivo...";
+      item.error = null;
+      renderQueue();
+      
+      let elapsed = 0;
+      let progressInterval = setInterval(() => {
+        elapsed += 1;
+        if (elapsed === 2) {
+          item.status_msg = "Buscando novos conteúdos...";
+        } else if (elapsed === 8) {
+          item.status_msg = "Revisando texto (Agente Revisor)...";
+        } else if (elapsed === 14) {
+          item.status_msg = "Salvando na nuvem...";
+        } else if (elapsed === 18) {
+          item.status_msg = "Quase pronto (90%)...";
+        }
+        renderQueue();
+      }, 1000);
+      
+      try {
+        const r = await fetch(`/api/queue/process/${encodeURIComponent(proj)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: item.safe_name })
+        });
+        const d = await r.json();
+        
+        clearInterval(progressInterval);
+        
+        if (d.ok) {
+          item.status = "completed";
+          item.checked = false; // Desmarca ao concluir
+          item.saved_as = d.saved_as;
+          toast(`✅ Processado: ${item.name}`, "success");
+        } else {
+          item.status = "failed";
+          item.error = d.error || "Erro desconhecido";
+          toast(`❌ Falha: ${item.name}`, "error");
+        }
+      } catch (err) {
+        clearInterval(progressInterval);
+        item.status = "failed";
+        item.error = "Falha de conexão";
+        toast(`❌ Erro de rede: ${item.name}`, "error");
+      }
+      
+      renderQueue();
+      _mdSig = "";
+      loadFiles(true);
+    }
+  }
+  
+  isProcessingQueue = false;
+  btn.disabled = false;
+  btn.textContent = "▶ Processar Selecionados";
+}
+
+async function reprocessQueueItem(idx) {
+  if (isProcessingQueue) return;
+  
+  const item = uploadQueue[idx];
+  item.status = "processing";
+  item.status_msg = "Lendo arquivo...";
+  item.error = null;
+  renderQueue();
+  
+  let elapsed = 0;
+  let progressInterval = setInterval(() => {
+    elapsed += 1;
+    if (elapsed === 2) {
+      item.status_msg = "Buscando novos conteúdos...";
+    } else if (elapsed === 8) {
+      item.status_msg = "Revisando texto (Agente Revisor)...";
+    } else if (elapsed === 14) {
+      item.status_msg = "Salvando na nuvem...";
+    } else if (elapsed === 18) {
+      item.status_msg = "Quase pronto (90%)...";
+    }
+    renderQueue();
+  }, 1000);
+  
+  try {
+    const r = await fetch(`/api/queue/process/${encodeURIComponent(proj)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: item.safe_name })
+    });
+    const d = await r.json();
+    
+    clearInterval(progressInterval);
+    
+    if (d.ok) {
+      item.status = "completed";
+      item.saved_as = d.saved_as;
+      toast(`✅ Processado: ${item.name}`, "success");
+    } else {
+      item.status = "failed";
+      item.error = d.error || "Erro desconhecido";
+      toast(`❌ Falha: ${item.name}`, "error");
+    }
+  } catch (err) {
+    clearInterval(progressInterval);
+    item.status = "failed";
+    item.error = "Falha de conexão";
+    toast(`❌ Erro de rede: ${item.name}`, "error");
+  }
+  
+  renderQueue();
+  _mdSig = "";
+  loadFiles(true);
 }
 
 // ══ AUTO-REFRESH ══
