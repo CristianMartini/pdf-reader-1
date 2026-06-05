@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Outputs / Temp
+outputs/
+temp/
+tmp/
+
+# IDEs and System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
