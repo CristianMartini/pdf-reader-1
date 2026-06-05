@@ -25,6 +25,25 @@ from firebase_admin import credentials, storage
 # ── Base ──
 BASE     = os.path.dirname(os.path.abspath(__file__))
 
+# ── Load .env file manually if exists ──
+env_path = os.path.join(BASE, ".env")
+if os.path.exists(env_path):
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    # Remove surrounding quotes if they exist
+                    if len(v) >= 2 and (
+                        (v.startswith('"') and v.endswith('"')) or
+                        (v.startswith("'") and v.endswith("'"))
+                    ):
+                        v = v[1:-1]
+                    os.environ[k] = v
+
 def is_vercel():
     return (
         os.environ.get("VERCEL") == "1"
@@ -73,34 +92,31 @@ def init_firebase():
             pass
     else:
         cred = None
+        project_id = None
         service_key_path = os.path.join(BASE, "serviceAccountKey.json")
         
-        # 1. Try local serviceAccountKey.json
-        if os.path.exists(service_key_path):
-            try:
-                cred = credentials.Certificate(service_key_path)
-                print("🔥 Firebase: Carregando chave de serviceAccountKey.json")
-            except Exception as e:
-                print(f"❌ Firebase: Erro ao ler serviceAccountKey.json: {e}")
-                
-        # 2. Try Vercel environment variable
-        elif os.environ.get("FIREBASE_CREDENTIALS"):
+        # 1. Try environment variable (either from .env locally or Vercel dashboard in production)
+        if os.environ.get("FIREBASE_CREDENTIALS"):
             try:
                 cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
                 cred = credentials.Certificate(cred_json)
+                project_id = cred_json.get("project_id")
                 print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS")
             except Exception as e:
                 print(f"❌ Firebase: Erro ao ler FIREBASE_CREDENTIALS env: {e}")
                 
+        # 2. Try local serviceAccountKey.json file
+        elif os.path.exists(service_key_path):
+            try:
+                cred = credentials.Certificate(service_key_path)
+                with open(service_key_path, "r", encoding="utf-8") as f:
+                    project_id = json.load(f).get("project_id")
+                print("🔥 Firebase: Carregando chave de serviceAccountKey.json")
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao ler serviceAccountKey.json: {e}")
+                
         if cred:
             try:
-                project_id = None
-                if os.path.exists(service_key_path):
-                    with open(service_key_path, "r", encoding="utf-8") as f:
-                        project_id = json.load(f).get("project_id")
-                elif os.environ.get("FIREBASE_CREDENTIALS"):
-                    project_id = json.loads(os.environ.get("FIREBASE_CREDENTIALS")).get("project_id")
-                
                 if project_id:
                     firebase_app = firebase_admin.initialize_app(cred)
                     
