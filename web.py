@@ -28,21 +28,47 @@ BASE     = os.path.dirname(os.path.abspath(__file__))
 # ── Load .env file manually if exists ──
 env_path = os.path.join(BASE, ".env")
 if os.path.exists(env_path):
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    k = k.strip()
-                    v = v.strip()
-                    # Remove surrounding quotes if they exist
-                    if len(v) >= 2 and (
-                        (v.startswith('"') and v.endswith('"')) or
-                        (v.startswith("'") and v.endswith("'"))
+    try:
+        import re
+        with open(env_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        lines = content.splitlines()
+        current_key = None
+        current_value_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            
+            match = re.match(r'^([A-Za-z0-9_]+)\s*=\s*(.*)$', line)
+            if match:
+                if current_key:
+                    val = "\n".join(current_value_lines).strip()
+                    if len(val) >= 2 and (
+                        (val.startswith('"') and val.endswith('"')) or
+                        (val.startswith("'") and val.endswith("'"))
                     ):
-                        v = v[1:-1]
-                    os.environ[k] = v
+                        val = val[1:-1]
+                    os.environ[current_key] = val
+                
+                current_key = match.group(1)
+                current_value_lines = [match.group(2)]
+            else:
+                if current_key:
+                    current_value_lines.append(line)
+        
+        if current_key:
+            val = "\n".join(current_value_lines).strip()
+            if len(val) >= 2 and (
+                (val.startswith('"') and val.endswith('"')) or
+                (val.startswith("'") and val.endswith("'"))
+            ):
+                val = val[1:-1]
+            os.environ[current_key] = val
+    except Exception as e:
+        print(f"❌ Error loading .env file: {e}")
 
 def is_vercel():
     return (
