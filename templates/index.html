@@ -82,7 +82,7 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 .spinning{display:inline-block;animation:spin 1s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* Estilos de Miniatura de Imagem com Hover Premium */
+/* Estilos de Item de Imagem */
 .img-item {
   display: flex;
   align-items: center;
@@ -93,85 +93,47 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
   border-radius: 8px;
   margin-bottom: 8px;
   transition: border-color 0.2s, box-shadow 0.2s;
-  position: relative;
+  cursor: pointer;
 }
 .img-item:hover {
   border-color: var(--navy);
   box-shadow: 0 2px 6px rgba(1, 22, 65, 0.08);
 }
-.img-thumb-container {
-  width: 44px;
-  height: 44px;
-  border-radius: 6px;
-  overflow: visible; /* Permite que o preview saia do container */
-  border: 1px solid var(--border);
-  background: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  position: relative;
-  flex-shrink: 0;
+.img-item .img-icon {
+  width: 36px; height: 36px; border-radius: 6px;
+  border: 1px solid var(--border); background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 1.2rem;
 }
-.img-thumb-inner {
-  width: 100%;
-  height: 100%;
-  border-radius: 6px;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.img-thumb-inner img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: transform 0.2s;
-}
-.img-thumb-container:hover .img-thumb-inner img {
-  transform: scale(1.1);
-}
-.img-preview-hover {
-  position: absolute;
-  bottom: 52px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 220px;
-  height: 220px;
+/* Preview flutuante global — position:fixed nunca é cortado por overflow */
+#imgFloatPreview {
+  position: fixed;
+  width: 260px;
+  max-height: 260px;
   background: #fff;
   border: 2px solid var(--navy);
   border-radius: 10px;
-  box-shadow: 0 10px 25px rgba(1, 22, 65, 0.2);
-  z-index: 100;
-  display: none;
+  box-shadow: 0 12px 32px rgba(1, 22, 65, 0.22);
+  z-index: 9999;
   pointer-events: none;
   overflow: hidden;
-  animation: previewFadeIn 0.15s ease-out;
+  opacity: 0;
+  transition: opacity 0.15s ease-out;
+  display: flex;
+  flex-direction: column;
 }
-.img-preview-hover::after {
-  content: "";
-  position: absolute;
-  bottom: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-  border-width: 10px 10px 0;
-  border-style: solid;
-  border-color: var(--navy) transparent;
-  display: block;
-  width: 0;
-}
-.img-preview-hover img {
-  width: 100%;
-  height: 100%;
+#imgFloatPreview.visible { opacity: 1; }
+#imgFloatPreview img {
+  width: 100%; max-height: 220px;
   object-fit: contain;
   background: #f1f5f9;
+  border-radius: 8px 8px 0 0;
 }
-.img-thumb-container:hover .img-preview-hover {
-  display: block;
-}
-@keyframes previewFadeIn {
-  from { opacity: 0; transform: translate(-50%, 10px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+#imgFloatPreview .preview-label {
+  padding: 4px 8px; font-size: .72rem;
+  color: var(--navy); text-align: center;
+  background: #f8fafc; border-top: 1px solid var(--border);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 </style>
 </head>
@@ -214,10 +176,16 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 
 <div id="toast"></div>
 
+<!-- Preview flutuante de imagem (position:fixed, fora de qualquer container) -->
+<div id="imgFloatPreview">
+  <img src="" alt="Preview">
+  <div class="preview-label"></div>
+</div>
+
 <script>
 let proj = null;   // projeto ativo
 let file = null;   // arquivo ativo
-let _mdSig = "", _pdfSig = "";
+let _mdSig = "", _pdfSig = "", _imgSig = "";
 let _toastT = null;
 let uploadQueue = []; // Fila de uploads para IA
 let isProcessingQueue = false;
@@ -267,7 +235,7 @@ function renderEmpty() {
 
 // ══ SELECIONAR PROJETO ══
 function selectProject(name) {
-  proj = name; file = null; _mdSig = ""; _pdfSig = "";
+  proj = name; file = null; _mdSig = ""; _pdfSig = ""; _imgSig = "";
   uploadQueue = []; // Limpa fila ao trocar de projeto
   isProcessingQueue = false;
   loadProjects();
@@ -414,25 +382,26 @@ async function loadFiles(silent=false) {
       </div>`).join("") || '<p class="muted">Nenhum documento</p>';
   }
 
-  document.getElementById("imgList").innerHTML = d.imgs.map(f => {
-    const url = `/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}`;
-    const fallbackSvg = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='44' height='44' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2' ry='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg>";
-    return `
-      <div class="img-item">
-        <input type="checkbox" class="img-check" value="${f}" style="cursor:pointer; width:16px; height:16px; flex-shrink:0;">
-        <div class="img-thumb-container" onclick="insImg('${f}')" title="Passe o mouse para ampliar. Clique para inserir.">
-          <div class="img-thumb-inner">
-            <img src="${url}" onerror="this.src=\`${fallbackSvg}\`"/>
-          </div>
-          <div class="img-preview-hover">
-            <img src="${url}" onerror="this.src=\`${fallbackSvg}\`"/>
-          </div>
+  const imgSig = JSON.stringify(d.imgs);
+  if (imgSig !== _imgSig) {
+    _imgSig = imgSig;
+    document.getElementById("imgList").innerHTML = d.imgs.map(f => {
+      const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+      return `
+        <div class="img-item"
+             data-img-url="/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}"
+             data-img-name="${f}"
+             onmouseenter="showImgPreview(event, this)"
+             onmousemove="moveImgPreview(event)"
+             onmouseleave="hideImgPreview()">
+          <input type="checkbox" class="img-check" value="${f}" style="cursor:pointer; width:16px; height:16px; flex-shrink:0;" onclick="event.stopPropagation()">
+          <div class="img-icon" onclick="insImg('${safeF}')">🖼️</div>
+          <span class="f-name" style="cursor:pointer; flex:1; word-break:break-all; font-size:.82rem; font-weight:500;" onclick="insImg('${safeF}')" title="Inserir no editor">${f}</span>
+          <button class="btn btn-ghost btn-sm" style="flex-shrink:0; padding:2px 6px;" onclick="event.stopPropagation(); delFile('img','${safeF}')">🗑</button>
         </div>
-        <span class="f-name" style="cursor:pointer; flex:1; word-break:break-all; font-size:.82rem; font-weight:500;" onclick="insImg('${f}')" title="Inserir no editor">${f}</span>
-        <button class="btn btn-ghost btn-sm" style="flex-shrink:0; padding:2px 6px;" onclick="delFile('img','${f}')">🗑</button>
-      </div>
-    `;
-  }).join("") || '<p class="muted">Nenhuma imagem</p>';
+      `;
+    }).join("") || '<p class="muted">Nenhuma imagem</p>';
+  }
 
   const pdfSig = JSON.stringify(d.pdfs);
   if (pdfSig !== _pdfSig) {
@@ -490,7 +459,7 @@ async function deleteCurrentFile() {
 
 async function delFile(kind, filename) {
   await fetch(`/api/delete/${encodeURIComponent(proj)}/${kind}/${encodeURIComponent(filename)}`, {method:"DELETE"});
-  _mdSig = _pdfSig = "";
+  _mdSig = _pdfSig = _imgSig = "";
   loadFiles(true);
   loadProjects();
   toast("🗑 Removido");
@@ -503,7 +472,7 @@ async function clearImages() {
   const d = await r.json();
   if (d.ok) {
     toast("🗑 Todas as imagens removidas");
-    _mdSig = _pdfSig = "";
+    _mdSig = _pdfSig = _imgSig = "";
     loadFiles(true);
   } else {
     toast("❌ Erro ao limpar imagens", "error");
@@ -518,7 +487,7 @@ async function uploadFile(input, kind) {
   const d = await r.json();
   if (d.ok) {
     toast(`✅ ${d.saved} arquivo(s) enviado(s)`,"success");
-    _mdSig=""; loadFiles(true); loadProjects();
+    _mdSig = _imgSig = ""; loadFiles(true); loadProjects();
     if (kind==='md' && input.files.length===1) loadFile(input.files[0].name);
   }
   input.value="";
@@ -558,6 +527,34 @@ function ins(text) {
   t.selectionStart = t.selectionEnd = s + text.length;
   t.focus();
 }
+
+// ══ PREVIEW FLUTUANTE DE IMAGEM ══
+function showImgPreview(ev, el) {
+  const prev = document.getElementById('imgFloatPreview');
+  const url = el.dataset.imgUrl;
+  const name = el.dataset.imgName;
+  const img = prev.querySelector('img');
+  const label = prev.querySelector('.preview-label');
+  img.src = url;
+  label.textContent = name;
+  // Posicionar perto do mouse
+  const x = Math.min(ev.clientX + 16, window.innerWidth - 280);
+  const y = Math.max(ev.clientY - 270, 10);
+  prev.style.left = x + 'px';
+  prev.style.top = y + 'px';
+  prev.classList.add('visible');
+}
+function moveImgPreview(ev) {
+  const prev = document.getElementById('imgFloatPreview');
+  const x = Math.min(ev.clientX + 16, window.innerWidth - 280);
+  const y = Math.max(ev.clientY - 270, 10);
+  prev.style.left = x + 'px';
+  prev.style.top = y + 'px';
+}
+function hideImgPreview() {
+  document.getElementById('imgFloatPreview').classList.remove('visible');
+}
+
 function insImg(f) {
   const t = document.getElementById("ed");
   const s = t.selectionStart, e = t.selectionEnd;
