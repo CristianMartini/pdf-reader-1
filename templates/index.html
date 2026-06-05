@@ -914,10 +914,74 @@ function toggleSelectAllQueue(checked) {
   renderQueue();
 }
 
-function removeFromQueue(idx) {
-  if (isProcessingQueue) return;
-  uploadQueue.splice(idx, 1);
+async function processQueueItem(item) {
+  item.status = "processing";
+  item.status_msg = "Lendo e extraindo texto (PDF)...";
+  item.error = null;
   renderQueue();
+  
+  try {
+    // Etapa 1: Extrair Texto do arquivo
+    const resExtract = await fetch(`/api/queue/extract/${encodeURIComponent(proj)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: item.safe_name })
+    });
+    const dataExtract = await resExtract.json();
+    if (!dataExtract.ok) throw new Error(dataExtract.error || "Falha ao extrair texto");
+    
+    // Etapa 2: Reescrever com Gemini AI (Primeira chamada de LLM)
+    item.status_msg = "Reescrevendo no estilo Evolux...";
+    renderQueue();
+    const resRewrite = await fetch("/api/queue/rewrite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: dataExtract.text })
+    });
+    const dataRewrite = await resRewrite.json();
+    if (!dataRewrite.ok) throw new Error(dataRewrite.error || "Falha na geração de conteúdo");
+    
+    // Etapa 3: Revisar com Gemini AI (Segunda chamada de LLM)
+    item.status_msg = "Revisando conteúdo (Agente Revisor)...";
+    renderQueue();
+    const resReview = await fetch("/api/queue/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ draft: dataRewrite.draft })
+    });
+    const dataReview = await resReview.json();
+    if (!dataReview.ok) throw new Error(dataReview.error || "Falha na revisão ortográfica");
+    
+    // Etapa 4: Salvar no projeto e na nuvem
+    item.status_msg = "Salvando e sincronizando na nuvem...";
+    renderQueue();
+    const resSave = await fetch(`/api/queue/save/${encodeURIComponent(proj)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: item.safe_name,
+        content: dataReview.final
+      })
+    });
+    const dataSave = await resSave.json();
+    if (!dataSave.ok) throw new Error(dataSave.error || "Falha ao salvar no projeto");
+    
+    // Concluído com Sucesso!
+    item.status = "completed";
+    item.checked = false; // Desmarca ao concluir
+    item.saved_as = dataSave.saved_as;
+    toast(`✅ Processado: ${item.name}`, "success");
+    
+  } catch (err) {
+    console.error(err);
+    item.status = "failed";
+    item.error = err.message || "Erro desconhecido";
+    toast(`❌ Falha: ${item.name}`, "error");
+  }
+  
+  renderQueue();
+  _mdSig = "";
+  loadFiles(true);
 }
 
 async function processQueue() {
@@ -937,56 +1001,7 @@ async function processQueue() {
   for (let i = 0; i < uploadQueue.length; i++) {
     const item = uploadQueue[i];
     if (item.checked && (item.status === "pending" || item.status === "failed")) {
-      item.status = "processing";
-      item.status_msg = "Lendo arquivo...";
-      item.error = null;
-      renderQueue();
-      
-      let elapsed = 0;
-      let progressInterval = setInterval(() => {
-        elapsed += 1;
-        if (elapsed === 2) {
-          item.status_msg = "Buscando novos conteúdos...";
-        } else if (elapsed === 8) {
-          item.status_msg = "Revisando texto (Agente Revisor)...";
-        } else if (elapsed === 14) {
-          item.status_msg = "Salvando na nuvem...";
-        } else if (elapsed === 18) {
-          item.status_msg = "Quase pronto (90%)...";
-        }
-        renderQueue();
-      }, 1000);
-      
-      try {
-        const r = await fetch(`/api/queue/process/${encodeURIComponent(proj)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: item.safe_name })
-        });
-        const d = await r.json();
-        
-        clearInterval(progressInterval);
-        
-        if (d.ok) {
-          item.status = "completed";
-          item.checked = false; // Desmarca ao concluir
-          item.saved_as = d.saved_as;
-          toast(`✅ Processado: ${item.name}`, "success");
-        } else {
-          item.status = "failed";
-          item.error = d.error || "Erro desconhecido";
-          toast(`❌ Falha: ${item.name}`, "error");
-        }
-      } catch (err) {
-        clearInterval(progressInterval);
-        item.status = "failed";
-        item.error = "Falha de conexão";
-        toast(`❌ Erro de rede: ${item.name}`, "error");
-      }
-      
-      renderQueue();
-      _mdSig = "";
-      loadFiles(true);
+      await processQueueItem(item);
     }
   }
   
@@ -997,53 +1012,9 @@ async function processQueue() {
 
 async function reprocessQueueItem(idx) {
   if (isProcessingQueue) return;
-  
   const item = uploadQueue[idx];
-  item.status = "processing";
-  item.status_msg = "Lendo arquivo...";
-  item.error = null;
-  renderQueue();
-  
-  let elapsed = 0;
-  let progressInterval = setInterval(() => {
-    elapsed += 1;
-    if (elapsed === 2) {
-      item.status_msg = "Buscando novos conteúdos...";
-    } else if (elapsed === 8) {
-      item.status_msg = "Revisando texto (Agente Revisor)...";
-    } else if (elapsed === 14) {
-      item.status_msg = "Salvando na nuvem...";
-    } else if (elapsed === 18) {
-      item.status_msg = "Quase pronto (90%)...";
-    }
-    renderQueue();
-  }, 1000);
-  
-  try {
-    const r = await fetch(`/api/queue/process/${encodeURIComponent(proj)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: item.safe_name })
-    });
-    const d = await r.json();
-    
-    clearInterval(progressInterval);
-    
-    if (d.ok) {
-      item.status = "completed";
-      item.saved_as = d.saved_as;
-      toast(`✅ Processado: ${item.name}`, "success");
-    } else {
-      item.status = "failed";
-      item.error = d.error || "Erro desconhecido";
-      toast(`❌ Falha: ${item.name}`, "error");
-    }
-  } catch (err) {
-    clearInterval(progressInterval);
-    item.status = "failed";
-    item.error = "Falha de conexão";
-    toast(`❌ Erro de rede: ${item.name}`, "error");
-  }
+  await processQueueItem(item);
+}
   
   renderQueue();
   _mdSig = "";

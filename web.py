@@ -729,6 +729,129 @@ def api_queue_confirm(project):
     return jsonify(ok=True, files=confirmed_files)
 
 
+@app.route("/api/queue/extract/<project>", methods=["POST"])
+def api_queue_extract(project):
+    data = request.json or {}
+    safe_name = secure_filename(data.get("filename", ""))
+    
+    if not safe_name:
+        return jsonify(ok=False, error="Nome de arquivo inválido")
+        
+    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    filepath = os.path.join(project_queue_dir, safe_name)
+    
+    b = get_bucket()
+    if not os.path.isfile(filepath) and b:
+        try:
+            blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+            blob = b.blob(blob_path)
+            if blob.exists():
+                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                blob.download_to_filename(filepath)
+                print(f"📥 Firebase: Arquivo temporário restaurado do backup para extração: {blob_path}")
+        except Exception as ex:
+            print(f"❌ Firebase: Erro ao restaurar arquivo temporário: {ex}")
+            
+    if not os.path.isfile(filepath):
+        return jsonify(ok=False, error="Arquivo temporário não encontrado no servidor")
+        
+    try:
+        ext = os.path.splitext(safe_name)[1].lower()
+        if ext == ".pdf":
+            raw_text = _extract_text_from_pdf(filepath)
+            if not raw_text.strip():
+                return jsonify(ok=False, error="O PDF parece estar vazio ou é uma imagem escaneada sem texto.")
+        elif ext in (".md", ".txt"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                raw_text = f.read()
+        else:
+            return jsonify(ok=False, error=f"Extensão de arquivo não suportada: {ext}")
+            
+        return jsonify(ok=True, text=raw_text)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
+
+
+@app.route("/api/queue/rewrite", methods=["POST"])
+def api_queue_rewrite():
+    data = request.json or {}
+    text = data.get("text", "")
+    if not text.strip():
+        return jsonify(ok=False, error="Texto vazio")
+        
+    try:
+        from ai.gemini_client import rewrite_content_to_style
+        draft = rewrite_content_to_style(text)
+        return jsonify(ok=True, draft=draft)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
+
+
+@app.route("/api/queue/review", methods=["POST"])
+def api_queue_review():
+    data = request.json or {}
+    draft = data.get("draft", "")
+    if not draft.strip():
+        return jsonify(ok=False, error="Rascunho vazio")
+        
+    try:
+        from ai.gemini_client import review_and_polish_markdown
+        final = review_and_polish_markdown(draft)
+        return jsonify(ok=True, final=final)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
+
+
+@app.route("/api/queue/save/<project>", methods=["POST"])
+def api_queue_save(project):
+    data = request.json or {}
+    safe_name = secure_filename(data.get("filename", ""))
+    content = data.get("content", "")
+    
+    if not safe_name or not content:
+        return jsonify(ok=False, error="Dados inválidos")
+        
+    try:
+        # Salva como novo .md no projeto
+        dest_filename = os.path.splitext(safe_name)[0] + ".md"
+        dest_path = os.path.join(_pdir(project), dest_filename)
+        
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        with open(dest_path, "w", encoding="utf-8") as f:
+            f.write(content)
+            
+        # Upload do novo markdown gerado para o Firebase
+        _upload_file_to_firebase(project, dest_filename, is_asset=False)
+        
+        # Limpar arquivo temporário local e no Firebase Storage
+        project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+        filepath = os.path.join(project_queue_dir, safe_name)
+        try:
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+        except Exception:
+            pass
+            
+        b = get_bucket()
+        if b:
+            try:
+                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob = b.blob(blob_path)
+                if blob.exists():
+                    blob.delete()
+                    print(f"🗑️ Firebase: Backup temporário removido de {blob_path}")
+            except Exception:
+                pass
+                
+        return jsonify(ok=True, saved_as=dest_filename)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
+
+
 @app.route("/api/queue/process/<project>", methods=["POST"])
 def api_queue_process(project):
     data = request.json or {}
