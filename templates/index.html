@@ -211,8 +211,11 @@ function renderMain() {
         
         <div id="queueSection" style="display:none; margin-top: 1rem;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
-            <span style="font-size:.82rem; font-weight:700; color:var(--navy);">Fila de Processamento (<span id="queueCount">0</span>)</span>
-            <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()">▶ Processar Fila</button>
+            <div style="display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="queueCheckAll" checked style="cursor:pointer; width:16px; height:16px;" onchange="toggleSelectAllQueue(this.checked)">
+              <span style="font-size:.82rem; font-weight:700; color:var(--navy);">Fila (<span id="queueCount">0</span>)</span>
+            </div>
+            <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()">▶ Processar Selecionados</button>
           </div>
           <div class="file-list" id="queueList" style="max-height: 200px;"></div>
         </div>
@@ -508,7 +511,8 @@ async function addFilesToQueue(input) {
           type: f.type,
           status: "pending",
           error: null,
-          saved_as: null
+          saved_as: null,
+          checked: true
         });
       });
       toast(`✅ ${d.files.length} arquivos na fila`, "success");
@@ -542,6 +546,13 @@ function renderQueue() {
     let statusBadge = "";
     let btnOpen = "";
     let btnReprocess = "";
+    let checkbox = "";
+    
+    if (item.status === "pending" || item.status === "failed") {
+      checkbox = `<input type="checkbox" class="queue-check" ${item.checked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px;" onchange="toggleQueueItemChecked(${idx}, this.checked)" ${isProcessingQueue ? 'disabled' : ''}>`;
+    } else {
+      checkbox = `<div style="width:16px; height:16px;"></div>`;
+    }
     
     if (item.status === "pending") {
       statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dde3f0; color:var(--text);">Pendente</span>`;
@@ -557,10 +568,13 @@ function renderQueue() {
     }
     
     return `
-      <div class="file-item" style="justify-content:space-between; gap:10px;">
-        <div style="display:flex; flex-direction:column; gap:2px; flex:1;">
-          <span style="font-weight:600; word-break:break-all;">${item.type === 'pdf' ? '📑' : '📄'} ${item.name}</span>
-          ${item.error ? `<span style="font-size:.72rem; color:var(--red); font-weight:normal;">${item.error}</span>` : ""}
+      <div class="file-item" style="justify-content:space-between; gap:10px; align-items:center;">
+        <div style="display:flex; align-items:center; gap:8px; flex:1;">
+          ${checkbox}
+          <div style="display:flex; flex-direction:column; gap:2px; flex:1;">
+            <span style="font-weight:600; word-break:break-all;">${item.type === 'pdf' ? '📑' : '📄'} ${item.name}</span>
+            ${item.error ? `<span style="font-size:.72rem; color:var(--red); font-weight:normal;">${item.error}</span>` : ""}
+          </div>
         </div>
         <div style="display:flex; align-items:center; gap:6px;">
           ${statusBadge}
@@ -573,6 +587,23 @@ function renderQueue() {
   }).join("");
 }
 
+function toggleQueueItemChecked(idx, checked) {
+  uploadQueue[idx].checked = checked;
+  if (!checked) {
+    const el = document.getElementById("queueCheckAll");
+    if (el) el.checked = false;
+  }
+}
+
+function toggleSelectAllQueue(checked) {
+  uploadQueue.forEach(item => {
+    if (item.status === "pending" || item.status === "failed") {
+      item.checked = checked;
+    }
+  });
+  renderQueue();
+}
+
 function removeFromQueue(idx) {
   if (isProcessingQueue) return;
   uploadQueue.splice(idx, 1);
@@ -582,29 +613,36 @@ function removeFromQueue(idx) {
 async function processQueue() {
   if (isProcessingQueue || uploadQueue.length === 0) return;
   
+  const targets = uploadQueue.filter(item => item.checked && (item.status === "pending" || item.status === "failed"));
+  if (targets.length === 0) {
+    toast("Selecione pelo menos um arquivo pendente para processar", "error");
+    return;
+  }
+  
   isProcessingQueue = true;
   const btn = document.getElementById("btnProcessQueue");
   btn.disabled = true;
   btn.innerHTML = '<span class="spinning">⏳</span> Processando...';
   
   for (let i = 0; i < uploadQueue.length; i++) {
-    if (uploadQueue[i].status === "pending" || uploadQueue[i].status === "failed") {
-      uploadQueue[i].status = "processing";
-      uploadQueue[i].status_msg = "Lendo arquivo...";
-      uploadQueue[i].error = null;
+    const item = uploadQueue[i];
+    if (item.checked && (item.status === "pending" || item.status === "failed")) {
+      item.status = "processing";
+      item.status_msg = "Lendo arquivo...";
+      item.error = null;
       renderQueue();
       
       let elapsed = 0;
       let progressInterval = setInterval(() => {
         elapsed += 1;
         if (elapsed === 2) {
-          uploadQueue[i].status_msg = "Buscando novos conteúdos...";
+          item.status_msg = "Buscando novos conteúdos...";
         } else if (elapsed === 8) {
-          uploadQueue[i].status_msg = "Revisando texto (Agente Revisor)...";
+          item.status_msg = "Revisando texto (Agente Revisor)...";
         } else if (elapsed === 14) {
-          uploadQueue[i].status_msg = "Salvando na nuvem...";
+          item.status_msg = "Salvando na nuvem...";
         } else if (elapsed === 18) {
-          uploadQueue[i].status_msg = "Quase pronto (90%)...";
+          item.status_msg = "Quase pronto (90%)...";
         }
         renderQueue();
       }, 1000);
@@ -613,26 +651,27 @@ async function processQueue() {
         const r = await fetch(`/api/queue/process/${encodeURIComponent(proj)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ filename: uploadQueue[i].safe_name })
+          body: JSON.stringify({ filename: item.safe_name })
         });
         const d = await r.json();
         
         clearInterval(progressInterval);
         
         if (d.ok) {
-          uploadQueue[i].status = "completed";
-          uploadQueue[i].saved_as = d.saved_as;
-          toast(`✅ Processado: ${uploadQueue[i].name}`, "success");
+          item.status = "completed";
+          item.checked = false; // Desmarca ao concluir
+          item.saved_as = d.saved_as;
+          toast(`✅ Processado: ${item.name}`, "success");
         } else {
-          uploadQueue[i].status = "failed";
-          uploadQueue[i].error = d.error || "Erro desconhecido";
-          toast(`❌ Falha: ${uploadQueue[i].name}`, "error");
+          item.status = "failed";
+          item.error = d.error || "Erro desconhecido";
+          toast(`❌ Falha: ${item.name}`, "error");
         }
       } catch (err) {
         clearInterval(progressInterval);
-        uploadQueue[i].status = "failed";
-        uploadQueue[i].error = "Falha de conexão";
-        toast(`❌ Erro de rede: ${uploadQueue[i].name}`, "error");
+        item.status = "failed";
+        item.error = "Falha de conexão";
+        toast(`❌ Erro de rede: ${item.name}`, "error");
       }
       
       renderQueue();
@@ -643,7 +682,7 @@ async function processQueue() {
   
   isProcessingQueue = false;
   btn.disabled = false;
-  btn.textContent = "▶ Processar Fila";
+  btn.textContent = "▶ Processar Selecionados";
 }
 
 async function reprocessQueueItem(idx) {
