@@ -866,6 +866,12 @@ def api_config_gemini():
     review_instructions = (
         "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
         "Sua missão é ler o rascunho de aula em Markdown abaixo e realizar uma revisão cirúrgica e rigorosa para deixá-lo impecável.\n\n"
+        "REGRA ABSOLUTA DE SAÍDA:\n"
+        "- Sua resposta deve conter EXCLUSIVAMENTE o texto Markdown revisado, começando diretamente com o bloco YAML (---) do cabeçalho.\n"
+        "- NUNCA inclua preâmbulos, explicações, comentários sobre a revisão, ou qualquer texto introdutório antes do conteúdo.\n"
+        "- NUNCA escreva frases como 'Como Revisor...', 'Realizei uma revisão...', 'Segue o texto revisado' etc.\n"
+        "- A primeira linha da sua resposta DEVE ser exatamente '---' (o início do cabeçalho YAML).\n"
+        "- Se o rascunho contiver blocos de código Markdown (```markdown ... ```), remova esses delimitadores e retorne apenas o conteúdo interno.\n\n"
         "DIRETRIZES DE REVISÃO:\n"
         "1. CORREÇÃO GRAMATICAL: Corrija quaisquer erros ortográficos, concordância e digitação.\n"
         "2. NÃO UNIR CABEÇALHOS AO TEXTO: O rascunho foi gerado a partir de textos de PDFs que podem conter quebras de linha. "
