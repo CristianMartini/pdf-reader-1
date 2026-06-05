@@ -219,6 +219,23 @@ def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
         print(f"❌ Firebase: Erro ao excluir {filename} do Firebase: {e}")
 
 
+def _delete_project_from_firebase(project_name: str):
+    """Exclui todos os blobs de um projeto no Firebase Storage."""
+    if not bucket:
+        return
+    try:
+        prefix = f"projects/{project_name}/"
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        if blobs:
+            for blob in blobs:
+                blob.delete()
+            print(f"🗑️ Firebase: Excluídos {len(blobs)} arquivos do projeto {project_name}")
+        # Limpar cache de sincronização
+        LAST_SYNCED.pop(project_name, None)
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao excluir projeto {project_name}: {e}")
+
+
 # ── Helpers ──
 def _pdir(project: str) -> str:
     return os.path.join(PROJECTS, secure_filename(project))
@@ -284,6 +301,8 @@ def api_delete_project(project):
     pd = _pdir(project)
     if os.path.isdir(pd):
         shutil.rmtree(pd)
+        # Excluir todos os arquivos do projeto no Firebase
+        _delete_project_from_firebase(project)
         return jsonify(ok=True)
     return jsonify(ok=False, error="Projeto não encontrado")
 
