@@ -5,6 +5,9 @@ SDK: google-genai (pip install google-genai)
 """
 
 import os
+import time
+import random
+import traceback
 from google import genai
 
 # Configuração via variável de ambiente (nunca hardcode a key)
@@ -36,6 +39,39 @@ def load_prompt() -> str:
         return f.read()
 
 
+def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2):
+    """
+    Executa client.models.generate_content com lógica de retentativa exponencial.
+    Cobre erros 503 (UNAVAILABLE), 429 (RESOURCE_EXHAUSTED/Rate Limit) e erros de rede temporários.
+    """
+    backoff = initial_backoff
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+            )
+            return response
+        except Exception as e:
+            err_msg = str(e)
+            is_temporary = any(term in err_msg for term in [
+                "503", "504", "429", "UNAVAILABLE", "ResourceExhausted", 
+                "RESOURCE_EXHAUSTED", "ServiceUnavailable", "temporary", 
+                "Please try again later", "overloaded", "high demand"
+            ])
+            
+            # Se for a última tentativa ou o erro não for temporário, joga a exceção
+            if attempt == max_retries - 1 or not is_temporary:
+                print(f"❌ Gemini: Falha definitiva no generate_content na tentativa {attempt + 1}: {e}")
+                raise e
+            
+            # Aplica backoff exponencial com jitter
+            sleep_time = backoff + random.uniform(0, 1)
+            print(f"⚠️ Gemini: Erro temporário ({err_msg}). Tentativa {attempt + 1}/{max_retries} falhou. Retentando em {sleep_time:.2f}s...")
+            time.sleep(sleep_time)
+            backoff *= 2 # Dobra o intervalo
+
+
 def generate_md(topic: str, model: str = "gemini-2.5-flash") -> str:
     """
     Gera conteúdo .md educacional para um tema.
@@ -44,7 +80,8 @@ def generate_md(topic: str, model: str = "gemini-2.5-flash") -> str:
     base_prompt = load_prompt()
     full_prompt = f"{base_prompt}\n\nTEMA: {topic}"
 
-    response = client.models.generate_content(
+    response = generate_content_with_retry(
+        client=client,
         model=model,
         contents=full_prompt,
     )
@@ -68,7 +105,8 @@ def rewrite_content_to_style(raw_content: str, model: str = "gemini-2.5-flash") 
         f"CONTEÚDO BRUTO A SER REESCRITO:\n{raw_content}"
     )
 
-    response = client.models.generate_content(
+    response = generate_content_with_retry(
+        client=client,
         model=model,
         contents=full_prompt,
     )
@@ -101,9 +139,9 @@ def review_and_polish_markdown(draft_markdown: str, model: str = "gemini-2.5-fla
         f"RASCUNHO A SER REVISADO:\n{draft_markdown}"
     )
 
-    response = client.models.generate_content(
+    response = generate_content_with_retry(
+        client=client,
         model=model,
         contents=review_prompt,
     )
     return response.text
-
