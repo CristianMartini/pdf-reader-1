@@ -24,7 +24,15 @@ from firebase_admin import credentials, storage
 
 # ── Base ──
 BASE     = os.path.dirname(os.path.abspath(__file__))
-if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"):
+
+def is_vercel():
+    return (
+        os.environ.get("VERCEL") == "1"
+        or os.environ.get("VERCEL_ENV") is not None
+        or not os.access(BASE, os.W_OK)
+    )
+
+if is_vercel():
     PROJECTS = "/tmp/projects"
     # Copy repository pre-existing projects to /tmp/projects so they are available and editable
     os.makedirs(PROJECTS, exist_ok=True)
@@ -52,6 +60,7 @@ os.makedirs(PROJECTS, exist_ok=True)
 # ── Firebase Initialization ──
 firebase_app = None
 bucket = None
+_bucket_resolved = False
 LAST_SYNCED = {}
 
 def init_firebase():
@@ -95,27 +104,10 @@ def init_firebase():
                 if project_id:
                     firebase_app = firebase_admin.initialize_app(cred)
                     
-                    # Testa os dois domínios possíveis para o bucket (novo padrão e antigo)
-                    bucket_name_new = f"{project_id}.firebasestorage.app"
-                    bucket_name_old = f"{project_id}.appspot.com"
-                    
-                    try:
-                        # Tenta obter e testar o bucket novo
-                        test_bucket = storage.bucket(name=bucket_name_new, app=firebase_app)
-                        test_bucket.exists() # Faz chamada de rede leve para validar existência
-                        bucket = test_bucket
-                        print(f"🔥 Firebase: Conectado com sucesso ao bucket {bucket_name_new}")
-                    except Exception:
-                        try:
-                            # Fallback para o padrão antigo
-                            test_bucket = storage.bucket(name=bucket_name_old, app=firebase_app)
-                            test_bucket.exists()
-                            bucket = test_bucket
-                            print(f"🔥 Firebase: Conectado com sucesso ao bucket {bucket_name_old} (Fallback)")
-                        except Exception as ex:
-                            # Se não houver internet ou se houver falha, assume o novo padrão
-                            bucket = storage.bucket(name=bucket_name_new, app=firebase_app)
-                            print(f"⚠️ Firebase: Inicializado para {bucket_name_new}, mas validação falhou: {ex}")
+                    # Inicializa o bucket padrão sem fazer chamadas de rede no startup
+                    bucket_name = f"{project_id}.firebasestorage.app"
+                    bucket = storage.bucket(name=bucket_name, app=firebase_app)
+                    print(f"🔥 Firebase: Inicializado com bucket padrão {bucket_name}")
                 else:
                     print("❌ Firebase: project_id não encontrado nos arquivos de credencial")
             except Exception as e:
@@ -125,12 +117,38 @@ def init_firebase():
 
 init_firebase()
 
+def get_bucket():
+    global bucket, _bucket_resolved
+    if not bucket or _bucket_resolved:
+        return bucket
+        
+    # Realiza a validação/resolução do bucket de forma preguiçosa (lazy)
+    try:
+        bucket.exists() # Testa o padrão (.firebasestorage.app)
+        _bucket_resolved = True
+        print(f"🔥 Firebase: Bucket validado com sucesso: {bucket.name}")
+    except Exception as e:
+        # Se falhar, tenta o fallback (.appspot.com)
+        if bucket.name.endswith(".firebasestorage.app"):
+            old_name = bucket.name.replace(".firebasestorage.app", ".appspot.com")
+            try:
+                fallback_bucket = storage.bucket(name=old_name, app=firebase_app)
+                fallback_bucket.exists()
+                bucket = fallback_bucket
+                _bucket_resolved = True
+                print(f"🔥 Firebase: Fallback para o bucket {old_name} com sucesso")
+            except Exception as ex:
+                print(f"⚠️ Firebase: Validação do bucket falhou em ambos os formatos. Usando padrão {bucket.name}. Erro: {ex}")
+                _bucket_resolved = True
+    return bucket
+
 
 def firebase_list_projects() -> list[str]:
-    if not bucket:
+    b = get_bucket()
+    if not b:
         return []
     try:
-        blobs = bucket.list_blobs(prefix="projects/", delimiter="/")
+        blobs = b.list_blobs(prefix="projects/", delimiter="/")
         list(blobs) # Consume list to populate prefixes
         prefixes = blobs.prefixes
         projects = []
@@ -145,7 +163,8 @@ def firebase_list_projects() -> list[str]:
 
 
 def _sync_project_from_firebase(project_name: str, force: bool = False):
-    if not bucket:
+    b = get_bucket()
+    if not b:
         return
         
     now = time.time()
@@ -156,7 +175,7 @@ def _sync_project_from_firebase(project_name: str, force: bool = False):
         
     try:
         prefix = f"projects/{project_name}/"
-        blobs = bucket.list_blobs(prefix=prefix)
+        blobs = b.list_blobs(prefix=prefix)
         local_proj_dir = os.path.join(PROJECTS, project_name)
         
         for blob in blobs:
@@ -181,7 +200,8 @@ def _sync_project_from_firebase(project_name: str, force: bool = False):
 
 
 def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = False):
-    if not bucket:
+    b = get_bucket()
+    if not b:
         return
         
     try:
@@ -194,7 +214,7 @@ def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = 
             blob_path = f"projects/{project_name}/{filename}"
             
         if os.path.isfile(local_path):
-            blob = bucket.blob(blob_path)
+            blob = b.blob(blob_path)
             blob.upload_from_filename(local_path)
             print(f"📤 Firebase: Upload concluído para {blob_path}")
     except Exception as e:
@@ -202,7 +222,8 @@ def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = 
 
 
 def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
-    if not bucket:
+    b = get_bucket()
+    if not b:
         return
         
     try:
@@ -211,7 +232,7 @@ def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
         else:
             blob_path = f"projects/{project_name}/{filename}"
             
-        blob = bucket.blob(blob_path)
+        blob = b.blob(blob_path)
         if blob.exists():
             blob.delete()
             print(f"🗑️ Firebase: Excluído {blob_path}")
@@ -221,11 +242,12 @@ def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
 
 def _delete_project_from_firebase(project_name: str):
     """Exclui todos os blobs de um projeto no Firebase Storage."""
-    if not bucket:
+    b = get_bucket()
+    if not b:
         return
     try:
         prefix = f"projects/{project_name}/"
-        blobs = list(bucket.list_blobs(prefix=prefix))
+        blobs = list(b.list_blobs(prefix=prefix))
         if blobs:
             for blob in blobs:
                 blob.delete()
@@ -525,7 +547,7 @@ def _extract_text_from_pdf(filepath: str) -> str:
 # ════════════════════════════════════════
 # IMPORTAÇÃO E FILA DE PROCESSAMENTO COM IA
 # ════════════════════════════════════════
-QUEUE_DIR = "/tmp/queue-uploads" if (os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV")) else os.path.join(BASE, "temp_queue_uploads")
+QUEUE_DIR = "/tmp/queue-uploads" if is_vercel() else os.path.join(BASE, "temp_queue_uploads")
 
 @app.route("/api/queue/upload/<project>", methods=["POST"])
 def api_queue_upload(project):
@@ -534,11 +556,24 @@ def api_queue_upload(project):
     os.makedirs(project_queue_dir, exist_ok=True)
     
     uploaded_files = []
+    b = get_bucket()
     for f in files:
         if f.filename:
             safe_name = secure_filename(f.filename)
             filepath = os.path.join(project_queue_dir, safe_name)
             f.save(filepath)
+            
+            # Se o Firebase estiver ativo, salvar uma cópia temporária na nuvem.
+            # Isso é crucial no Vercel (serverless) onde instâncias são efêmeras
+            # e a fila de processamento pode cair em outro container sem o arquivo local.
+            if b:
+                try:
+                    blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                    blob = b.blob(blob_path)
+                    blob.upload_from_filename(filepath)
+                    print(f"📤 Firebase: Backup temporário concluído para {blob_path}")
+                except Exception as ex:
+                    print(f"⚠️ Firebase: Falha no backup temporário: {ex}")
             
             ext = os.path.splitext(safe_name)[1].lower().replace(".", "")
             uploaded_files.append({
@@ -561,6 +596,22 @@ def api_queue_process(project):
     project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
     filepath = os.path.join(project_queue_dir, safe_name)
     
+    b = get_bucket()
+    
+    # Se o arquivo não estiver localmente (ex: container reiniciou/trocou no Vercel),
+    # tenta restaurar do backup temporário do Firebase Storage
+    if not os.path.isfile(filepath):
+        if b:
+            try:
+                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob = b.blob(blob_path)
+                if blob.exists():
+                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                    blob.download_to_filename(filepath)
+                    print(f"📥 Firebase: Arquivo temporário restaurado do backup: {blob_path}")
+            except Exception as ex:
+                print(f"❌ Firebase: Erro ao restaurar arquivo temporário: {ex}")
+                
     if not os.path.isfile(filepath):
         return jsonify(ok=False, error="Arquivo temporário não encontrado no servidor")
         
@@ -593,16 +644,35 @@ def api_queue_process(project):
         # Upload do novo markdown gerado pela IA para o Firebase
         _upload_file_to_firebase(project, dest_filename, is_asset=False)
             
-        # 4. Remover arquivo temporário
+        # 4. Limpar arquivo temporário local e backup no Firebase
         try:
             os.remove(filepath)
         except Exception:
             pass
             
+        if b:
+            try:
+                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob = b.blob(blob_path)
+                if blob.exists():
+                    blob.delete()
+                    print(f"🗑️ Firebase: Backup temporário removido de {blob_path}")
+            except Exception:
+                pass
+            
         return jsonify(ok=True, saved_as=dest_filename)
         
     except Exception as e:
         traceback.print_exc()
+        # Garante que removemos do Firebase mesmo em caso de erro no processamento
+        if b:
+            try:
+                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob = b.blob(blob_path)
+                if blob.exists():
+                    blob.delete()
+            except Exception:
+                pass
         return jsonify(ok=False, error=str(e))
 
 

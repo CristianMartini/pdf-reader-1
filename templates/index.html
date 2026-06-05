@@ -481,6 +481,18 @@ async function clearImages() {
 
 async function uploadFile(input, kind) {
   if (!input.files.length || !proj) return;
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (!isLocal) {
+    let totalSize = 0;
+    for (let i = 0; i < input.files.length; i++) {
+      totalSize += input.files[i].size;
+    }
+    if (totalSize > 4.5 * 1024 * 1024) {
+      toast("❌ Limite de 4.5MB excedido (restrição do Vercel). Faça upload local ou envie arquivos menores.", "error");
+      input.value = "";
+      return;
+    }
+  }
   const fd = new FormData();
   for (let i=0;i<input.files.length;i++) fd.append("files", input.files[i]);
   const r = await fetch(`/api/upload/${encodeURIComponent(proj)}/${kind}`, {method:"POST",body:fd});
@@ -619,7 +631,18 @@ function toast(msg, type="success") {
 // ══ FILA DE PROCESSAMENTO COM IA ══
 async function addFilesToQueue(input) {
   if (!input.files.length || !proj) return;
-  
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  if (!isLocal) {
+    let totalSize = 0;
+    for (let i = 0; i < input.files.length; i++) {
+      totalSize += input.files[i].size;
+    }
+    if (totalSize > 4.5 * 1024 * 1024) {
+      toast("❌ Limite de 4.5MB excedido (restrição do Vercel). Faça upload local ou envie arquivos menores.", "error");
+      input.value = "";
+      return;
+    }
+  }
   const fd = new FormData();
   for (let i = 0; i < input.files.length; i++) {
     fd.append("files", input.files[i]);
