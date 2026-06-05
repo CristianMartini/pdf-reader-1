@@ -92,13 +92,30 @@ def init_firebase():
                 elif os.environ.get("FIREBASE_CREDENTIALS"):
                     project_id = json.loads(os.environ.get("FIREBASE_CREDENTIALS")).get("project_id")
                 
-                bucket_name = f"{project_id}.appspot.com" if project_id else None
-                if bucket_name:
-                    firebase_app = firebase_admin.initialize_app(cred, {
-                        'storageBucket': bucket_name
-                    })
-                    bucket = storage.bucket(app=firebase_app)
-                    print(f"🔥 Firebase: Inicializado com sucesso para o bucket {bucket_name}")
+                if project_id:
+                    firebase_app = firebase_admin.initialize_app(cred)
+                    
+                    # Testa os dois domínios possíveis para o bucket (novo padrão e antigo)
+                    bucket_name_new = f"{project_id}.firebasestorage.app"
+                    bucket_name_old = f"{project_id}.appspot.com"
+                    
+                    try:
+                        # Tenta obter e testar o bucket novo
+                        test_bucket = storage.bucket(name=bucket_name_new, app=firebase_app)
+                        test_bucket.exists() # Faz chamada de rede leve para validar existência
+                        bucket = test_bucket
+                        print(f"🔥 Firebase: Conectado com sucesso ao bucket {bucket_name_new}")
+                    except Exception:
+                        try:
+                            # Fallback para o padrão antigo
+                            test_bucket = storage.bucket(name=bucket_name_old, app=firebase_app)
+                            test_bucket.exists()
+                            bucket = test_bucket
+                            print(f"🔥 Firebase: Conectado com sucesso ao bucket {bucket_name_old} (Fallback)")
+                        except Exception as ex:
+                            # Se não houver internet ou se houver falha, assume o novo padrão
+                            bucket = storage.bucket(name=bucket_name_new, app=firebase_app)
+                            print(f"⚠️ Firebase: Inicializado para {bucket_name_new}, mas validação falhou: {ex}")
                 else:
                     print("❌ Firebase: project_id não encontrado nos arquivos de credencial")
             except Exception as e:
