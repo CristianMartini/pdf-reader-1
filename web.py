@@ -25,6 +25,51 @@ from firebase_admin import credentials, storage
 # ── Base ──
 BASE     = os.path.dirname(os.path.abspath(__file__))
 
+# ── Load .env file manually if exists ──
+env_path = os.path.join(BASE, ".env")
+if os.path.exists(env_path):
+    try:
+        import re
+        with open(env_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        lines = content.splitlines()
+        current_key = None
+        current_value_lines = []
+        
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            
+            match = re.match(r'^([A-Za-z0-9_]+)\s*=\s*(.*)$', line)
+            if match:
+                if current_key:
+                    val = "\n".join(current_value_lines).strip()
+                    if len(val) >= 2 and (
+                        (val.startswith('"') and val.endswith('"')) or
+                        (val.startswith("'") and val.endswith("'"))
+                    ):
+                        val = val[1:-1]
+                    os.environ[current_key] = val
+                
+                current_key = match.group(1)
+                current_value_lines = [match.group(2)]
+            else:
+                if current_key:
+                    current_value_lines.append(line)
+        
+        if current_key:
+            val = "\n".join(current_value_lines).strip()
+            if len(val) >= 2 and (
+                (val.startswith('"') and val.endswith('"')) or
+                (val.startswith("'") and val.endswith("'"))
+            ):
+                val = val[1:-1]
+            os.environ[current_key] = val
+    except Exception as e:
+        print(f"❌ Error loading .env file: {e}")
+
 def is_vercel():
     return (
         os.environ.get("VERCEL") == "1"
@@ -73,34 +118,31 @@ def init_firebase():
             pass
     else:
         cred = None
+        project_id = None
         service_key_path = os.path.join(BASE, "serviceAccountKey.json")
         
-        # 1. Try local serviceAccountKey.json
-        if os.path.exists(service_key_path):
-            try:
-                cred = credentials.Certificate(service_key_path)
-                print("🔥 Firebase: Carregando chave de serviceAccountKey.json")
-            except Exception as e:
-                print(f"❌ Firebase: Erro ao ler serviceAccountKey.json: {e}")
-                
-        # 2. Try Vercel environment variable
-        elif os.environ.get("FIREBASE_CREDENTIALS"):
+        # 1. Try environment variable (either from .env locally or Vercel dashboard in production)
+        if os.environ.get("FIREBASE_CREDENTIALS"):
             try:
                 cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
                 cred = credentials.Certificate(cred_json)
+                project_id = cred_json.get("project_id")
                 print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS")
             except Exception as e:
                 print(f"❌ Firebase: Erro ao ler FIREBASE_CREDENTIALS env: {e}")
                 
+        # 2. Try local serviceAccountKey.json file
+        elif os.path.exists(service_key_path):
+            try:
+                cred = credentials.Certificate(service_key_path)
+                with open(service_key_path, "r", encoding="utf-8") as f:
+                    project_id = json.load(f).get("project_id")
+                print("🔥 Firebase: Carregando chave de serviceAccountKey.json")
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao ler serviceAccountKey.json: {e}")
+                
         if cred:
             try:
-                project_id = None
-                if os.path.exists(service_key_path):
-                    with open(service_key_path, "r", encoding="utf-8") as f:
-                        project_id = json.load(f).get("project_id")
-                elif os.environ.get("FIREBASE_CREDENTIALS"):
-                    project_id = json.loads(os.environ.get("FIREBASE_CREDENTIALS")).get("project_id")
-                
                 if project_id:
                     firebase_app = firebase_admin.initialize_app(cred)
                     
@@ -773,36 +815,41 @@ def api_queue_extract(project):
         return jsonify(ok=False, error=str(e))
 
 
-@app.route("/api/queue/rewrite", methods=["POST"])
-def api_queue_rewrite():
-    data = request.json or {}
-    text = data.get("text", "")
-    if not text.strip():
-        return jsonify(ok=False, error="Texto vazio")
-        
+@app.route("/api/config/gemini", methods=["GET"])
+def api_config_gemini():
+    from ai.gemini_client import load_prompt, API_KEY
     try:
-        from ai.gemini_client import rewrite_content_to_style
-        draft = rewrite_content_to_style(text)
-        return jsonify(ok=True, draft=draft)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify(ok=False, error=str(e))
-
-
-@app.route("/api/queue/review", methods=["POST"])
-def api_queue_review():
-    data = request.json or {}
-    draft = data.get("draft", "")
-    if not draft.strip():
-        return jsonify(ok=False, error="Rascunho vazio")
+        base_prompt = load_prompt()
+    except Exception:
+        base_prompt = ""
         
-    try:
-        from ai.gemini_client import review_and_polish_markdown
-        final = review_and_polish_markdown(draft)
-        return jsonify(ok=True, final=final)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify(ok=False, error=str(e))
+    key = os.environ.get("GEMINI_API_KEY", API_KEY)
+    
+    review_instructions = (
+        "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
+        "Sua missão é ler o rascunho de aula em Markdown abaixo e realizar uma revisão cirúrgica e rigorosa para deixá-lo impecável.\n\n"
+        "DIRETRIZES DE REVISÃO:\n"
+        "1. CORREÇÃO GRAMATICAL: Corrija quaisquer erros ortográficos, concordância e digitação.\n"
+        "2. NÃO UNIR CABEÇALHOS AO TEXTO: O rascunho foi gerado a partir de textos de PDFs que podem conter quebras de linha. "
+        "ATENÇÃO CRÍTICA: NUNCA una uma linha que começa com cabeçalhos (#, ##, ###, ####) à linha seguinte! Os títulos devem sempre ficar em suas próprias linhas, isolados. "
+        "Se o rascunho contiver cabeçalhos colados na mesma linha que o texto do parágrafo seguinte (ex: '#### Sinais Duvidosos de Conjunção Carnal São indicativos que...'), "
+        "corrija obrigatoriamente inserindo uma quebra de linha dupla (uma linha em branco) de forma que o título fique isolado (ex:\n"
+        "#### Sinais Duvidosos de Conjunção Carnal\n\nSão indicativos que...).\n"
+        "3. UNIR FRASES TRUNCADAS: Una frases no corpo dos parágrafos normais que parecem cortadas ou palavras grudadas de forma inadequada devido a quebras de páginas (ex: se encontrar algo como 'aborto.usta e ética da lei', corrija para 'aborto. A busca justa e ética da lei').\n"
+        "4. SANITIZAÇÃO DE MARCAÇÕES: Remova crases ou caracteres de código das marcações especiais do nosso parser de PDF. "
+        "Exemplo: se encontrar `[BOX]` ou `[/BOX]` com crases/backticks, remova as crases e garanta que fiquem puras em linhas isoladas: [BOX] e [/BOX]. "
+        "Faça o mesmo para as tags de imagem: `[IMG:nome.jpg]` deve se tornar apenas [IMG:nome.jpg] sem crases.\n"
+        "5. REMOVER LEGENDAS DE IMAGEM AUTOMÁTICAS: Remova qualquer legenda de imagem, descrição ou nota textual em itálico/negrito (como *Ilustração de...* ou *Legenda...*) gerada automaticamente logo abaixo ou acima das tags [IMG:...]. As tags de imagem devem aparecer totalmente isoladas em suas próprias linhas sem qualquer texto explicativo associado.\n"
+        "6. NÃO ALUCINE: Mantenha todo o conteúdo didático, técnico, exercícios e formatação de cabeçalho YAML intactos. Apenas lapide a escrita e corrija as falhas de formatação/junção.\n"
+        "7. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
+    )
+    
+    return jsonify(
+        ok=True,
+        key=key,
+        base_prompt=base_prompt,
+        review_instructions=review_instructions
+    )
 
 
 @app.route("/api/queue/save/<project>", methods=["POST"])
