@@ -481,8 +481,8 @@ async function clearImages() {
 
 async function uploadFile(input, kind) {
   if (!input.files.length || !proj) return;
-  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  if (!isLocal) {
+  const isVercel = window.location.hostname.endsWith('.vercel.app');
+  if (isVercel) {
     let totalSize = 0;
     for (let i = 0; i < input.files.length; i++) {
       totalSize += input.files[i].size;
@@ -631,8 +631,8 @@ function toast(msg, type="success") {
 // ══ FILA DE PROCESSAMENTO COM IA ══
 async function addFilesToQueue(input) {
   if (!input.files.length || !proj) return;
-  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  if (!isLocal) {
+  const isVercel = window.location.hostname.endsWith('.vercel.app');
+  if (isVercel) {
     let totalSize = 0;
     for (let i = 0; i < input.files.length; i++) {
       totalSize += input.files[i].size;
