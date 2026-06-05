@@ -1,11 +1,5 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "web.py",
-      "use": "@vercel/python"
-    }
-  ],
   "functions": {
     "web.py": {
       "maxDuration": 60
