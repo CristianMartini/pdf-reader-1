@@ -545,7 +545,7 @@ function renderQueue() {
     if (item.status === "pending") {
       statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dde3f0; color:var(--text);">Pendente</span>`;
     } else if (item.status === "processing") {
-      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#f9d549; color:var(--navy);"><span class="spinning">⏳</span> Processando...</span>`;
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#f9d549; color:var(--navy);"><span class="spinning">⏳</span> ${item.status_msg || 'Processando...'}</span>`;
     } else if (item.status === "completed") {
       statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dcfce7; color:#15803d;">Pronto</span>`;
       btnOpen = `<button class="btn btn-primary btn-sm" style="padding:2px 6px; font-size:.75rem;" onclick="loadFile('${item.saved_as}')">Editar</button>`;
@@ -586,8 +586,24 @@ async function processQueue() {
   for (let i = 0; i < uploadQueue.length; i++) {
     if (uploadQueue[i].status === "pending" || uploadQueue[i].status === "failed") {
       uploadQueue[i].status = "processing";
+      uploadQueue[i].status_msg = "Lendo arquivo...";
       uploadQueue[i].error = null;
       renderQueue();
+      
+      let elapsed = 0;
+      let progressInterval = setInterval(() => {
+        elapsed += 1;
+        if (elapsed === 2) {
+          uploadQueue[i].status_msg = "Buscando novos conteúdos...";
+        } else if (elapsed === 8) {
+          uploadQueue[i].status_msg = "Revisando texto (Agente Revisor)...";
+        } else if (elapsed === 14) {
+          uploadQueue[i].status_msg = "Salvando na nuvem...";
+        } else if (elapsed === 18) {
+          uploadQueue[i].status_msg = "Quase pronto (90%)...";
+        }
+        renderQueue();
+      }, 1000);
       
       try {
         const r = await fetch(`/api/queue/process/${encodeURIComponent(proj)}`, {
@@ -596,6 +612,8 @@ async function processQueue() {
           body: JSON.stringify({ filename: uploadQueue[i].safe_name })
         });
         const d = await r.json();
+        
+        clearInterval(progressInterval);
         
         if (d.ok) {
           uploadQueue[i].status = "completed";
@@ -607,6 +625,7 @@ async function processQueue() {
           toast(`❌ Falha: ${uploadQueue[i].name}`, "error");
         }
       } catch (err) {
+        clearInterval(progressInterval);
         uploadQueue[i].status = "failed";
         uploadQueue[i].error = "Falha de conexão";
         toast(`❌ Erro de rede: ${uploadQueue[i].name}`, "error");

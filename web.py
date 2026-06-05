@@ -537,9 +537,10 @@ def api_queue_process(project):
         else:
             return jsonify(ok=False, error=f"Extensão de arquivo não suportada: {ext}")
             
-        # 2. Envio para a IA Gemini
-        from ai.gemini_client import rewrite_content_to_style
-        rewritten_markdown = rewrite_content_to_style(raw_text)
+        # 2. Envio para a IA Gemini (Geração + Revisão)
+        from ai.gemini_client import rewrite_content_to_style, review_and_polish_markdown
+        draft_markdown = rewrite_content_to_style(raw_text)
+        rewritten_markdown = review_and_polish_markdown(draft_markdown)
         
         # 3. Salvar como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"

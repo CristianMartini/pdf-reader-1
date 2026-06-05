@@ -73,3 +73,31 @@ def rewrite_content_to_style(raw_content: str, model: str = "gemini-2.5-flash") 
     )
     return response.text
 
+
+def review_and_polish_markdown(draft_markdown: str, model: str = "gemini-2.5-flash") -> str:
+    """
+    Atua como um Revisor Editorial Sênior da Evolux Academy.
+    Analisa o rascunho em markdown, corrige erros gramaticais, une frases truncadas,
+    garante a coesão pedagógica, sanitiza as tags de imagem e caixas [BOX] e retorna o markdown lapidado.
+    """
+    review_prompt = (
+        "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
+        "Sua missão é ler o rascunho de aula em Markdown abaixo e realizar uma revisão cirúrgica e rigorosa para deixá-lo impecável.\n\n"
+        "DIRETRIZES DE REVISÃO:\n"
+        "1. CORREÇÃO GRAMATICAL: Corrija quaisquer erros ortográficos, concordância e digitação.\n"
+        "2. UNIR FRASES TRUNCADAS: O rascunho foi gerado a partir de textos de PDFs que podem conter quebras de linha e palavras coladas incorretamente. "
+        "Una frases que parecem cortadas ou palavras grudadas de forma inadequada (ex: se encontrar algo como 'aborto.usta e ética da lei', corrija para 'aborto. A busca justa e ética da lei').\n"
+        "3. SANITIZAÇÃO DE MARCAÇÕES: Remova crases ou caracteres de código das marcações especiais do nosso parser de PDF. "
+        "Exemplo: se encontrar `[BOX]` ou `[/BOX]` com crases/backticks, remova as crases e garanta que fiquem puras em linhas isoladas: [BOX] e [/BOX]. "
+        "Faça o mesmo para as tags de imagem: `[IMG:nome.jpg]` deve se tornar apenas [IMG:nome.jpg] sem crases.\n"
+        "4. NÃO ALUCINE: Mantenha todo o conteúdo didático, técnico, exercícios e formatação de cabeçalho YAML intactos. Apenas lapide a escrita e corrija as falhas de formatação/junção.\n"
+        "5. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica.\n\n"
+        f"RASCUNHO A SER REVISADO:\n{draft_markdown}"
+    )
+
+    response = client.models.generate_content(
+        model=model,
+        contents=review_prompt,
+    )
+    return response.text
+

@@ -357,15 +357,16 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             continue
 
         line = line.strip()
+        clean_line = line.replace("`", "").strip()
 
         # BOX abertura
-        if line == "[BOX]":
+        if clean_line == "[BOX]":
             in_box = True
             buf = []
             continue
 
         # BOX fechamento
-        if line == "[/BOX]":
+        if clean_line == "[/BOX]":
             story.append(Paragraph(_format_inline(" ".join(buf)), BOX))
             in_box = False
             continue
