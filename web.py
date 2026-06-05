@@ -430,6 +430,10 @@ def api_generate():
 def serve_pdf(project, filename):
     return send_from_directory(_pdir(project), filename)
 
+@app.route("/projects/<project>/assets/<path:filename>")
+def serve_asset(project, filename):
+    return send_from_directory(_adir(project), filename)
+
 @app.route("/api/instrucoes-ia")
 def serve_ai_instructions():
     from flask import Response
