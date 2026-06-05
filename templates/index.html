@@ -184,68 +184,88 @@ function selectProject(name) {
 
 function renderMain() {
   document.getElementById("mainArea").innerHTML = `
-    <!-- Arquivos -->
-    <div class="card">
-      <div class="card-title">
-        <span>📄 Documentos</span>
-        <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdUp').click()">＋ Upload .md</button>
-        <input type="file" id="mdUp" accept=".md" style="display:none" onchange="uploadFile(this,'md')">
-      </div>
-      <div class="file-list" id="mdList"></div>
-
-      <hr style="border:none;border-top:1px solid var(--border);margin:1rem 0;">
-
-      <div class="card-title">
-        <span>🖼️ Imagens</span>
-        <div>
-          <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
-          <button class="btn btn-danger btn-sm" onclick="clearImages()" style="margin-left:4px;">🗑 Limpar</button>
+    <!-- COLUNA DA ESQUERDA: FLUXO DE ARQUIVOS (PASSO 1, 2 E 3) -->
+    <div style="display: flex; flex-direction: column; gap: 1.2rem;">
+      
+      <!-- CARD PASSO 1: IMPORTADOR EM LOTE COM IA -->
+      <div class="card">
+        <div class="card-title">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 1</span>
+            <span>🤖 Importar Aulas (Lote/IA)</span>
+          </div>
         </div>
-        <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
+        <p class="muted" style="margin-bottom:.8rem; line-height: 1.4;">
+          Suba múltiplos arquivos <b>.pdf</b> ou <b>.md</b> antigos. A IA extrairá o texto e reescreverá no padrão Evolux.
+        </p>
+        
+        <div style="border: 2px dashed var(--border); padding: 1.2rem; text-align: center; border-radius: 8px; cursor: pointer; transition: border-color .15s;" 
+             id="dropZone"
+             onclick="document.getElementById('queueUp').click()"
+             onmouseover="this.style.borderColor='var(--gold)'"
+             onmouseout="this.style.borderColor='var(--border)'">
+          <span style="font-size: 1.5rem; display: block; margin-bottom: 4px;">📤</span>
+          <span style="font-size: .85rem; font-weight: 600; color: var(--navy);">Selecionar arquivos .pdf ou .md</span>
+          <input type="file" id="queueUp" accept=".md,.pdf" multiple style="display:none" onchange="addFilesToQueue(this)">
+        </div>
+        
+        <div id="queueSection" style="display:none; margin-top: 1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+            <span style="font-size:.82rem; font-weight:700; color:var(--navy);">Fila de Processamento (<span id="queueCount">0</span>)</span>
+            <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()">▶ Processar Fila</button>
+          </div>
+          <div class="file-list" id="queueList" style="max-height: 200px;"></div>
+        </div>
       </div>
-      <div class="file-list" id="imgList"></div>
-      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-        <button class="btn btn-gold btn-sm" onclick="insertSelectedImages()">▶ Inserir Selecionadas Juntas</button>
+
+      <!-- CARD PASSO 2: DOCUMENTOS -->
+      <div class="card">
+        <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 2</span>
+            <span>📄 Selecionar Documento</span>
+          </div>
+          <div>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdUp').click()">＋ Upload .md</button>
+            <input type="file" id="mdUp" accept=".md" style="display:none" onchange="uploadFile(this,'md')">
+          </div>
+        </div>
+        <p class="muted" style="margin-bottom:.6rem;">Selecione um arquivo Markdown abaixo para carregar no editor.</p>
+        <div class="file-list" id="mdList" style="max-height: 180px;"></div>
       </div>
-      <p class="muted" style="margin-top:6px; line-height: 1.4;">
-        Clique no nome para inserir 1 imagem sozinha, ou marque as caixas e clique no botão acima para agrupá-las lado a lado.
-      </p>
+
+      <!-- CARD PASSO 3: IMAGENS -->
+      <div class="card">
+        <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 3</span>
+            <span>🖼️ Inserir Imagens</span>
+          </div>
+          <div>
+            <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
+            <button class="btn btn-danger btn-sm" onclick="clearImages()" style="margin-left:4px;">🗑 Limpar</button>
+            <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
+          </div>
+        </div>
+        <p class="muted" style="margin-bottom:.6rem;">Clique para inserir no cursor do editor ou selecione caixas para agrupar.</p>
+        <div class="file-list" id="imgList" style="max-height: 180px;"></div>
+        <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+          <button class="btn btn-gold btn-sm" onclick="insertSelectedImages()" style="width: 100%; justify-content: center;">▶ Inserir Selecionadas Juntas</button>
+        </div>
+      </div>
+
     </div>
 
-    <!-- Importador em Lote (IA) -->
-    <div class="card" style="margin-top: 1.2rem;">
-      <div class="card-title">
-        <span>🤖 Importar em Lote (IA)</span>
-      </div>
-      <p class="muted" style="margin-bottom:.8rem; line-height: 1.4;">
-        Suba múltiplos arquivos <b>.pdf</b> ou <b>.md</b>. A IA lerá o conteúdo, adaptará às normas de formatação do PDF Engine Evolux e gerará novos documentos prontos para edição.
-      </p>
-      
-      <div style="border: 2px dashed var(--border); padding: 1.2rem; text-align: center; border-radius: 8px; cursor: pointer; transition: border-color .15s;" 
-           id="dropZone"
-           onclick="document.getElementById('queueUp').click()"
-           onmouseover="this.style.borderColor='var(--gold)'"
-           onmouseout="this.style.borderColor='var(--border)'">
-        <span style="font-size: 1.5rem; display: block; margin-bottom: 4px;">📤</span>
-        <span style="font-size: .85rem; font-weight: 600; color: var(--navy);">Selecionar arquivos .pdf ou .md</span>
-        <input type="file" id="queueUp" accept=".md,.pdf" multiple style="display:none" onchange="addFilesToQueue(this)">
-      </div>
-      
-      <div id="queueSection" style="display:none; margin-top: 1rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
-          <span style="font-size:.82rem; font-weight:700; color:var(--navy);">Fila de Processamento (<span id="queueCount">0</span>)</span>
-          <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()">▶ Processar Fila</button>
+    <!-- COLUNA DA DIREITA: EDITOR E CRIAÇÃO (PASSO 4) -->
+    <div class="card" style="display: flex; flex-direction: column; gap: 0.8rem; height: 100%;">
+      <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 0;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 4</span>
+          <span>✍️ Editor de Conteúdo</span>
         </div>
-        <div class="file-list" id="queueList" style="max-height: 250px;"></div>
-      </div>
-    </div>
-
-    <!-- Editor -->
-    <div class="card">
-      <div class="card-title">
-        <span>✍️ Editor</span>
         <span id="fileName" style="font-size:.82rem;color:var(--muted);font-weight:normal;">Nenhum arquivo</span>
       </div>
+      
       <div class="toolbar">
         <button class="btn btn-ghost btn-sm" onclick="ins('# ')">H1</button>
         <button class="btn btn-ghost btn-sm" onclick="ins('## ')">H2</button>
@@ -256,19 +276,25 @@ function renderMain() {
         <button class="btn btn-ghost btn-sm" onclick="insImg('img1.jpg|img2.jpg')">2 Imagens</button>
         <button class="btn btn-ghost btn-sm" onclick="insDivider()">Divisor</button>
       </div>
-      <textarea id="ed" placeholder="Selecione um arquivo ou comece a escrever...&#10;&#10;Use front-matter:&#10;---&#10;title: Título da Aula&#10;aula: 01&#10;---"></textarea>
+      
+      <textarea id="ed" style="flex: 1; min-height: 520px;" placeholder="Selecione um arquivo ou comece a escrever...&#10;&#10;Use front-matter:&#10;---&#10;title: Título da Aula&#10;aula: 01&#10;---"></textarea>
+      
       <div class="actions">
         <button class="btn btn-primary" onclick="saveFile()">💾 Salvar</button>
         <button class="btn btn-gold" id="btnGen" onclick="generatePDF()">▶ Gerar PDF</button>
         <button class="btn btn-danger" id="btnDel" onclick="deleteCurrentFile()" style="display:none;margin-left:auto;">🗑 Excluir</button>
       </div>
+      
       <div class="log" id="log"></div>
     </div>
 
-    <!-- PDFs -->
+    <!-- SEÇÃO INFERIOR: PDFs GERADOS (PASSO 5) -->
     <div class="card full">
       <div class="card-title">
-        <span>📑 PDFs Gerados</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 5</span>
+          <span>📑 PDFs Gerados (Padrão Evolux)</span>
+        </div>
         <span id="pdfCount" style="font-size:.8rem;color:var(--muted);font-weight:normal;"></span>
       </div>
       <div id="pdfList" style="display:flex;flex-wrap:wrap;gap:10px;"></div>
