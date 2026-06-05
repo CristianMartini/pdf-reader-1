@@ -221,6 +221,21 @@ def firebase_list_projects() -> list[str]:
         return []
 
 
+def _firebase_count_files(project_name: str) -> dict:
+    """Count md and pdf files in a Firebase project WITHOUT downloading."""
+    b = get_bucket()
+    if not b:
+        return {"mds": 0, "pdfs": 0}
+    try:
+        prefix = f"projects/{project_name}/"
+        blobs = list(b.list_blobs(prefix=prefix))
+        mds = sum(1 for bl in blobs if bl.name.endswith(".md") and "/assets/" not in bl.name)
+        pdfs = sum(1 for bl in blobs if bl.name.endswith(".pdf") and "/assets/" not in bl.name)
+        return {"mds": mds, "pdfs": pdfs}
+    except Exception:
+        return {"mds": 0, "pdfs": 0}
+
+
 def _sync_project_from_firebase(project_name: str, force: bool = False):
     b = get_bucket()
     if not b:
@@ -229,7 +244,7 @@ def _sync_project_from_firebase(project_name: str, force: bool = False):
     now = time.time()
     last = LAST_SYNCED.get(project_name, 0)
     
-    if not force and (now - last < 30):
+    if not force and (now - last < 120):
         return
         
     try:
@@ -341,7 +356,7 @@ def api_list_projects():
     items = []
     project_names = set()
     
-    # 1. Get remote Firebase projects first
+    # 1. Get remote Firebase projects first (fast, single network call)
     remote_projs = firebase_list_projects()
     for name in remote_projs:
         project_names.add(name)
@@ -363,11 +378,15 @@ def api_list_projects():
                         pass
         
     for name in sorted(project_names):
-        # Sincroniza do Firebase antes de ler a contagem de mds e pdfs
-        _sync_project_from_firebase(name)
+        # Conta de arquivos: prioriza disco local, com fallback para Firebase metadata (sem download)
         pd = _pdir(name)
-        mds  = len(glob.glob(os.path.join(pd, "*.md")))
-        pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
+        if os.path.isdir(pd):
+            mds  = len(glob.glob(os.path.join(pd, "*.md")))
+            pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
+        else:
+            counts = _firebase_count_files(name)
+            mds = counts["mds"]
+            pdfs = counts["pdfs"]
         items.append({"name": name, "mds": mds, "pdfs": pdfs})
         
     return jsonify(projects=items)
@@ -402,10 +421,9 @@ def api_delete_project(project):
     pd = _pdir(project)
     if os.path.isdir(pd):
         shutil.rmtree(pd)
-        # Excluir todos os arquivos do projeto no Firebase
-        _delete_project_from_firebase(project)
-        return jsonify(ok=True)
-    return jsonify(ok=False, error="Projeto não encontrado")
+    # Excluir todos os arquivos do projeto no Firebase (mesmo que o diretório local não exista)
+    _delete_project_from_firebase(project)
+    return jsonify(ok=True)
 
 
 # ════════════════════════════════════════

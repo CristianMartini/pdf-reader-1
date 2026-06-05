@@ -1091,7 +1091,11 @@ async function reprocessQueueItem(idx) {
 }
 
 // ══ AUTO-REFRESH ══
-setInterval(() => { if (proj) loadFiles(true); loadProjects(); }, 5000);
+setInterval(() => {
+  if (isProcessingQueue) return; // Não atualiza enquanto a fila IA está processando
+  if (proj) loadFiles(true);
+  loadProjects();
+}, 30000);
 
 loadProjects();
 </script>
