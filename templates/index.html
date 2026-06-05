@@ -453,7 +453,22 @@ function ins(text) {
   t.selectionStart = t.selectionEnd = s + text.length;
   t.focus();
 }
-function insImg(f) { ins('\n[IMG:' + f + ']\n'); }
+function insImg(f) {
+  const t = document.getElementById("ed");
+  const s = t.selectionStart, e = t.selectionEnd;
+  const selText = t.value.substring(s, e);
+  
+  if (s !== e && /\[IMG:[^\]]+\]/.test(selText)) {
+    const newText = selText.replace(/\[IMG:[^\]]+\]/, `[IMG:${f}]`);
+    t.value = t.value.substring(0, s) + newText + t.value.substring(e);
+    t.selectionStart = s;
+    t.selectionEnd = s + newText.length;
+    t.focus();
+    toast("🖼️ Imagem substituída na tag mantendo a legenda", "success");
+  } else {
+    ins('\n[IMG:' + f + ']\n');
+  }
+}
 function insertSelectedImages() {
   const checks = document.querySelectorAll('.img-check:checked');
   if (checks.length === 0) {
@@ -461,7 +476,21 @@ function insertSelectedImages() {
     return;
   }
   const names = Array.from(checks).map(c => c.value).join('|');
-  ins('\n[IMG:' + names + ']\n');
+  
+  const t = document.getElementById("ed");
+  const s = t.selectionStart, e = t.selectionEnd;
+  const selText = t.value.substring(s, e);
+  
+  if (s !== e && /\[IMG:[^\]]+\]/.test(selText)) {
+    const newText = selText.replace(/\[IMG:[^\]]+\]/, `[IMG:${names}]`);
+    t.value = t.value.substring(0, s) + newText + t.value.substring(e);
+    t.selectionStart = s;
+    t.selectionEnd = s + newText.length;
+    t.focus();
+    toast("🖼️ Imagens substituídas na tag mantendo a legenda", "success");
+  } else {
+    ins('\n[IMG:' + names + ']\n');
+  }
   
   // Desmarcar depois de inserir
   checks.forEach(c => c.checked = false);
