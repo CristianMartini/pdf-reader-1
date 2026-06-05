@@ -127,6 +127,8 @@ let proj = null;   // projeto ativo
 let file = null;   // arquivo ativo
 let _mdSig = "", _pdfSig = "";
 let _toastT = null;
+let uploadQueue = []; // Fila de uploads para IA
+let isProcessingQueue = false;
 
 // ══ PROJETOS ══
 async function loadProjects() {
@@ -174,6 +176,8 @@ function renderEmpty() {
 // ══ SELECIONAR PROJETO ══
 function selectProject(name) {
   proj = name; file = null; _mdSig = ""; _pdfSig = "";
+  uploadQueue = []; // Limpa fila ao trocar de projeto
+  isProcessingQueue = false;
   loadProjects();
   renderMain();
 }
@@ -206,6 +210,34 @@ function renderMain() {
       <p class="muted" style="margin-top:6px; line-height: 1.4;">
         Clique no nome para inserir 1 imagem sozinha, ou marque as caixas e clique no botão acima para agrupá-las lado a lado.
       </p>
+    </div>
+
+    <!-- Importador em Lote (IA) -->
+    <div class="card" style="margin-top: 1.2rem;">
+      <div class="card-title">
+        <span>🤖 Importar em Lote (IA)</span>
+      </div>
+      <p class="muted" style="margin-bottom:.8rem; line-height: 1.4;">
+        Suba múltiplos arquivos <b>.pdf</b> ou <b>.md</b>. A IA lerá o conteúdo, adaptará às normas de formatação do PDF Engine Evolux e gerará novos documentos prontos para edição.
+      </p>
+      
+      <div style="border: 2px dashed var(--border); padding: 1.2rem; text-align: center; border-radius: 8px; cursor: pointer; transition: border-color .15s;" 
+           id="dropZone"
+           onclick="document.getElementById('queueUp').click()"
+           onmouseover="this.style.borderColor='var(--gold)'"
+           onmouseout="this.style.borderColor='var(--border)'">
+        <span style="font-size: 1.5rem; display: block; margin-bottom: 4px;">📤</span>
+        <span style="font-size: .85rem; font-weight: 600; color: var(--navy);">Selecionar arquivos .pdf ou .md</span>
+        <input type="file" id="queueUp" accept=".md,.pdf" multiple style="display:none" onchange="addFilesToQueue(this)">
+      </div>
+      
+      <div id="queueSection" style="display:none; margin-top: 1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+          <span style="font-size:.82rem; font-weight:700; color:var(--navy);">Fila de Processamento (<span id="queueCount">0</span>)</span>
+          <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()">▶ Processar Fila</button>
+        </div>
+        <div class="file-list" id="queueList" style="max-height: 250px;"></div>
+      </div>
     </div>
 
     <!-- Editor -->
@@ -422,6 +454,147 @@ function toast(msg, type="success") {
   el.textContent = msg; el.className = `show ${type}`;
   clearTimeout(_toastT);
   _toastT = setTimeout(() => el.className="", 3000);
+}
+
+// ══ FILA DE PROCESSAMENTO COM IA ══
+async function addFilesToQueue(input) {
+  if (!input.files.length || !proj) return;
+  
+  const fd = new FormData();
+  for (let i = 0; i < input.files.length; i++) {
+    fd.append("files", input.files[i]);
+  }
+  
+  toast("Enviando arquivos para a fila...", "success");
+  
+  try {
+    const r = await fetch(`/api/queue/upload/${encodeURIComponent(proj)}`, {
+      method: "POST",
+      body: fd
+    });
+    const d = await r.json();
+    
+    if (d.ok) {
+      d.files.forEach(f => {
+        uploadQueue.push({
+          name: f.name,
+          safe_name: f.safe_name,
+          type: f.type,
+          status: "pending",
+          error: null,
+          saved_as: null
+        });
+      });
+      toast(`✅ ${d.files.length} arquivos na fila`, "success");
+      renderQueue();
+    } else {
+      toast("❌ Erro ao adicionar arquivos: " + d.error, "error");
+    }
+  } catch (err) {
+    toast("❌ Falha de rede no upload", "error");
+  }
+  
+  input.value = "";
+}
+
+function renderQueue() {
+  const sec = document.getElementById("queueSection");
+  const list = document.getElementById("queueList");
+  const count = document.getElementById("queueCount");
+  
+  if (!sec || !list || !count) return;
+  
+  if (uploadQueue.length === 0) {
+    sec.style.display = "none";
+    return;
+  }
+  
+  sec.style.display = "block";
+  count.textContent = uploadQueue.length;
+  
+  list.innerHTML = uploadQueue.map((item, idx) => {
+    let statusBadge = "";
+    let btnOpen = "";
+    
+    if (item.status === "pending") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dde3f0; color:var(--text);">Pendente</span>`;
+    } else if (item.status === "processing") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#f9d549; color:var(--navy);"><span class="spinning">⏳</span> Processando...</span>`;
+    } else if (item.status === "completed") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dcfce7; color:#15803d;">Pronto</span>`;
+      btnOpen = `<button class="btn btn-primary btn-sm" style="padding:2px 6px; font-size:.75rem;" onclick="loadFile('${item.saved_as}')">Editar</button>`;
+    } else if (item.status === "failed") {
+      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#fee2e2; color:#b91c1c;" title="${item.error || 'Erro desconhecido'}">Falha</span>`;
+    }
+    
+    return `
+      <div class="file-item" style="justify-content:space-between; gap:10px;">
+        <div style="display:flex; flex-direction:column; gap:2px; flex:1;">
+          <span style="font-weight:600; word-break:break-all;">${item.type === 'pdf' ? '📑' : '📄'} ${item.name}</span>
+          ${item.error ? `<span style="font-size:.72rem; color:var(--red); font-weight:normal;">${item.error}</span>` : ""}
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          ${statusBadge}
+          ${btnOpen}
+          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;" onclick="removeFromQueue(${idx})" ${isProcessingQueue ? 'disabled' : ''}>🗑</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function removeFromQueue(idx) {
+  if (isProcessingQueue) return;
+  uploadQueue.splice(idx, 1);
+  renderQueue();
+}
+
+async function processQueue() {
+  if (isProcessingQueue || uploadQueue.length === 0) return;
+  
+  isProcessingQueue = true;
+  const btn = document.getElementById("btnProcessQueue");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinning">⏳</span> Processando...';
+  
+  for (let i = 0; i < uploadQueue.length; i++) {
+    if (uploadQueue[i].status === "pending" || uploadQueue[i].status === "failed") {
+      uploadQueue[i].status = "processing";
+      uploadQueue[i].error = null;
+      renderQueue();
+      
+      try {
+        const r = await fetch(`/api/queue/process/${encodeURIComponent(proj)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: uploadQueue[i].safe_name })
+        });
+        const d = await r.json();
+        
+        if (d.ok) {
+          uploadQueue[i].status = "completed";
+          uploadQueue[i].saved_as = d.saved_as;
+          toast(`✅ Processado: ${uploadQueue[i].name}`, "success");
+        } else {
+          uploadQueue[i].status = "failed";
+          uploadQueue[i].error = d.error || "Erro desconhecido";
+          toast(`❌ Falha: ${uploadQueue[i].name}`, "error");
+        }
+      } catch (err) {
+        uploadQueue[i].status = "failed";
+        uploadQueue[i].error = "Falha de conexão";
+        toast(`❌ Erro de rede: ${uploadQueue[i].name}`, "error");
+      }
+      
+      renderQueue();
+      _mdSig = "";
+      loadFiles(true);
+    }
+  }
+  
+  isProcessingQueue = false;
+  btn.disabled = false;
+  btn.textContent = "▶ Processar Fila";
 }
 
 // ══ AUTO-REFRESH ══

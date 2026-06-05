@@ -23,7 +23,7 @@ def load_prompt() -> str:
         return f.read()
 
 
-def generate_md(topic: str, model: str = "gemini-3-flash-preview") -> str:
+def generate_md(topic: str, model: str = "gemini-2.5-flash") -> str:
     """
     Gera conteúdo .md educacional para um tema.
     Retorna o texto markdown gerado pelo Gemini.
@@ -36,3 +36,27 @@ def generate_md(topic: str, model: str = "gemini-3-flash-preview") -> str:
         contents=full_prompt,
     )
     return response.text
+
+
+def rewrite_content_to_style(raw_content: str, model: str = "gemini-2.5-flash") -> str:
+    """
+    Reescreve um conteúdo bruto (.md ou texto extraído de PDF) adaptando-o
+    às diretrizes pedagógicas e técnicas descritas em prompt.md.
+    """
+    base_prompt = load_prompt()
+    full_prompt = (
+        f"{base_prompt}\n\n"
+        "INSTRUÇÃO ADICIONAL: Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado acima. "
+        "Preserve o conteúdo didático e técnico, mas estruture com cabeçalho YAML apropriado (titulo, aula e materia), "
+        "títulos (#, ##, ###), parágrafos separados por uma linha em branco, listas com traços, e adicione pelo menos "
+        "um bloco [BOX] para fixação de conteúdo importante. Insira tags [IMG:nome_imagem.jpg] caso faça sentido pedagógico "
+        "no texto, para que o usuário possa inserir imagens depois.\n\n"
+        f"CONTEÚDO BRUTO A SER REESCRITO:\n{raw_content}"
+    )
+
+    response = client.models.generate_content(
+        model=model,
+        contents=full_prompt,
+    )
+    return response.text
+

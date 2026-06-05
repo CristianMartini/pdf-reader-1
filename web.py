@@ -283,6 +283,97 @@ Para criar transições claras entre tópicos distintos, use três traços em um
     )
 
 
+def _extract_text_from_pdf(filepath: str) -> str:
+    from pypdf import PdfReader
+    reader = PdfReader(filepath)
+    text = ""
+    for page in reader.pages:
+        t = page.extract_text()
+        if t:
+            text += t + "\n"
+    return text
+
+
+# ════════════════════════════════════════
+# IMPORTAÇÃO E FILA DE PROCESSAMENTO COM IA
+# ════════════════════════════════════════
+QUEUE_DIR = "/tmp/queue-uploads" if (os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV")) else os.path.join(BASE, "temp_queue_uploads")
+
+@app.route("/api/queue/upload/<project>", methods=["POST"])
+def api_queue_upload(project):
+    files = request.files.getlist("files")
+    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    os.makedirs(project_queue_dir, exist_ok=True)
+    
+    uploaded_files = []
+    for f in files:
+        if f.filename:
+            safe_name = secure_filename(f.filename)
+            filepath = os.path.join(project_queue_dir, safe_name)
+            f.save(filepath)
+            
+            ext = os.path.splitext(safe_name)[1].lower().replace(".", "")
+            uploaded_files.append({
+                "name": f.filename,
+                "safe_name": safe_name,
+                "type": ext
+            })
+            
+    return jsonify(ok=True, files=uploaded_files)
+
+
+@app.route("/api/queue/process/<project>", methods=["POST"])
+def api_queue_process(project):
+    data = request.json or {}
+    safe_name = secure_filename(data.get("filename", ""))
+    
+    if not safe_name:
+        return jsonify(ok=False, error="Nome de arquivo inválido")
+        
+    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    filepath = os.path.join(project_queue_dir, safe_name)
+    
+    if not os.path.isfile(filepath):
+        return jsonify(ok=False, error="Arquivo temporário não encontrado no servidor")
+        
+    try:
+        # 1. Extração de texto
+        ext = os.path.splitext(safe_name)[1].lower()
+        if ext == ".pdf":
+            raw_text = _extract_text_from_pdf(filepath)
+            if not raw_text.strip():
+                return jsonify(ok=False, error="O PDF parece estar vazio ou é uma imagem escaneada sem texto.")
+        elif ext in (".md", ".txt"):
+            with open(filepath, "r", encoding="utf-8") as f:
+                raw_text = f.read()
+        else:
+            return jsonify(ok=False, error=f"Extensão de arquivo não suportada: {ext}")
+            
+        # 2. Envio para a IA Gemini
+        from ai.gemini_client import rewrite_content_to_style
+        rewritten_markdown = rewrite_content_to_style(raw_text)
+        
+        # 3. Salvar como novo .md no projeto
+        dest_filename = os.path.splitext(safe_name)[0] + ".md"
+        dest_path = os.path.join(_pdir(project), dest_filename)
+        
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        with open(dest_path, "w", encoding="utf-8") as f:
+            f.write(rewritten_markdown)
+            
+        # 4. Remover arquivo temporário
+        try:
+            os.remove(filepath)
+        except Exception:
+            pass
+            
+        return jsonify(ok=True, saved_as=dest_filename)
+        
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
+
+
 # ════════════════════════════════════════
 # MAIN
 # ════════════════════════════════════════
