@@ -1,14 +1,14 @@
 {
   "version": 2,
   "functions": {
-    "web.py": {
+    "api/index.py": {
       "maxDuration": 60
     }
   },
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "web.py"
+      "dest": "api/index.py"
     }
   ]
 }
