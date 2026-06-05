@@ -979,6 +979,30 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   }
 }
 
+function sanitizeMarkdown(txt) {
+  if (!txt) return "";
+  let clean = txt.trim();
+  
+  // 1. Remove tags de bloco markdown envolventes (ex: ```markdown ... ```)
+  clean = clean.replace(/^```markdown\s*/i, "");
+  clean = clean.replace(/^```\s*/, "");
+  clean = clean.replace(/\s*```$/, "");
+  clean = clean.trim();
+  
+  // 2. Remove qualquer preâmbulo/comentário de introdução antes do cabeçalho YAML
+  const yamlStartIndex = clean.indexOf("---");
+  if (yamlStartIndex !== -1 && yamlStartIndex > 0) {
+    // Verifica se o texto anterior contém algo além de espaços
+    const beforeYaml = clean.substring(0, yamlStartIndex).trim();
+    if (beforeYaml.length > 0) {
+      console.log("✂️ Sanitizador: Removendo preâmbulo encontrado antes do cabeçalho YAML:", beforeYaml);
+      clean = clean.substring(yamlStartIndex).trim();
+    }
+  }
+  
+  return clean;
+}
+
 async function processQueueItem(item) {
   item.status = "processing";
   item.status_msg = "Lendo e extraindo texto (PDF)...";
@@ -1011,10 +1035,12 @@ async function processQueueItem(item) {
       "títulos (#, ##, ###, ####), parágrafos separados por uma linha em branco, listas com traços, e adicione pelo menos " +
       "um bloco [BOX] para fixação de conteúdo importante. Insira tags [IMG:nome_imagem.jpg] caso faça sentido pedagógico " +
       "no texto, para que o usuário possa inserir imagens depois. ATENÇÃO: NUNCA gere qualquer legenda em itálico ou texto " +
-      "descritivo embaixo das tags [IMG:...]. Deixe a tag de imagem isolada em sua própria linha.\n\n" +
+      "descritivo embaixo das tags [IMG:...]. Deixe a tag de imagem isolada em sua própria linha. " +
+      "Importante: Sua resposta deve começar diretamente com '---' sem qualquer mensagem introdutória ou saudação.\n\n" +
       `CONTEÚDO BRUTO A SER REESCRITO:\n${dataExtract.text}`;
       
-    const draftMarkdown = await callGeminiDirect(rewritePrompt);
+    let draftMarkdown = await callGeminiDirect(rewritePrompt);
+    draftMarkdown = sanitizeMarkdown(draftMarkdown);
     
     // 4. Revisar com Gemini AI (Chamada direta no client, sem timeout Vercel)
     item.status_msg = "Revisando conteúdo (Agente Revisor)...";
@@ -1023,7 +1049,8 @@ async function processQueueItem(item) {
     const reviewPrompt = `${config.review_instructions}\n\n` +
       `RASCUNHO A SER REVISADO:\n${draftMarkdown}`;
       
-    const finalMarkdown = await callGeminiDirect(reviewPrompt);
+    let finalMarkdown = await callGeminiDirect(reviewPrompt);
+    finalMarkdown = sanitizeMarkdown(finalMarkdown);
     
     // 5. Salvar no projeto e na nuvem
     item.status_msg = "Salvando e sincronizando na nuvem...";
@@ -1091,7 +1118,11 @@ async function reprocessQueueItem(idx) {
 }
 
 // ══ AUTO-REFRESH ══
-setInterval(() => { if (proj) loadFiles(true); loadProjects(); }, 5000);
+setInterval(() => {
+  if (isProcessingQueue) return; // Não atualiza enquanto a fila IA está processando
+  if (proj) loadFiles(true);
+  loadProjects();
+}, 30000);
 
 loadProjects();
 </script>

@@ -221,6 +221,21 @@ def firebase_list_projects() -> list[str]:
         return []
 
 
+def _firebase_count_files(project_name: str) -> dict:
+    """Count md and pdf files in a Firebase project WITHOUT downloading."""
+    b = get_bucket()
+    if not b:
+        return {"mds": 0, "pdfs": 0}
+    try:
+        prefix = f"projects/{project_name}/"
+        blobs = list(b.list_blobs(prefix=prefix))
+        mds = sum(1 for bl in blobs if bl.name.endswith(".md") and "/assets/" not in bl.name)
+        pdfs = sum(1 for bl in blobs if bl.name.endswith(".pdf") and "/assets/" not in bl.name)
+        return {"mds": mds, "pdfs": pdfs}
+    except Exception:
+        return {"mds": 0, "pdfs": 0}
+
+
 def _sync_project_from_firebase(project_name: str, force: bool = False):
     b = get_bucket()
     if not b:
@@ -229,7 +244,7 @@ def _sync_project_from_firebase(project_name: str, force: bool = False):
     now = time.time()
     last = LAST_SYNCED.get(project_name, 0)
     
-    if not force and (now - last < 30):
+    if not force and (now - last < 120):
         return
         
     try:
@@ -341,7 +356,7 @@ def api_list_projects():
     items = []
     project_names = set()
     
-    # 1. Get remote Firebase projects first
+    # 1. Get remote Firebase projects first (fast, single network call)
     remote_projs = firebase_list_projects()
     for name in remote_projs:
         project_names.add(name)
@@ -363,11 +378,15 @@ def api_list_projects():
                         pass
         
     for name in sorted(project_names):
-        # Sincroniza do Firebase antes de ler a contagem de mds e pdfs
-        _sync_project_from_firebase(name)
+        # Conta de arquivos: prioriza disco local, com fallback para Firebase metadata (sem download)
         pd = _pdir(name)
-        mds  = len(glob.glob(os.path.join(pd, "*.md")))
-        pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
+        if os.path.isdir(pd):
+            mds  = len(glob.glob(os.path.join(pd, "*.md")))
+            pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
+        else:
+            counts = _firebase_count_files(name)
+            mds = counts["mds"]
+            pdfs = counts["pdfs"]
         items.append({"name": name, "mds": mds, "pdfs": pdfs})
         
     return jsonify(projects=items)
@@ -402,10 +421,9 @@ def api_delete_project(project):
     pd = _pdir(project)
     if os.path.isdir(pd):
         shutil.rmtree(pd)
-        # Excluir todos os arquivos do projeto no Firebase
-        _delete_project_from_firebase(project)
-        return jsonify(ok=True)
-    return jsonify(ok=False, error="Projeto não encontrado")
+    # Excluir todos os arquivos do projeto no Firebase (mesmo que o diretório local não exista)
+    _delete_project_from_firebase(project)
+    return jsonify(ok=True)
 
 
 # ════════════════════════════════════════
@@ -848,6 +866,12 @@ def api_config_gemini():
     review_instructions = (
         "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
         "Sua missão é ler o rascunho de aula em Markdown abaixo e realizar uma revisão cirúrgica e rigorosa para deixá-lo impecável.\n\n"
+        "REGRA ABSOLUTA DE SAÍDA:\n"
+        "- Sua resposta deve conter EXCLUSIVAMENTE o texto Markdown revisado, começando diretamente com o bloco YAML (---) do cabeçalho.\n"
+        "- NUNCA inclua preâmbulos, explicações, comentários sobre a revisão, ou qualquer texto introdutório antes do conteúdo.\n"
+        "- NUNCA escreva frases como 'Como Revisor...', 'Realizei uma revisão...', 'Segue o texto revisado' etc.\n"
+        "- A primeira linha da sua resposta DEVE ser exatamente '---' (o início do cabeçalho YAML).\n"
+        "- Se o rascunho contiver blocos de código Markdown (```markdown ... ```), remova esses delimitadores e retorne apenas o conteúdo interno.\n\n"
         "DIRETRIZES DE REVISÃO:\n"
         "1. CORREÇÃO GRAMATICAL: Corrija quaisquer erros ortográficos, concordância e digitação.\n"
         "2. NÃO UNIR CABEÇALHOS AO TEXTO: O rascunho foi gerado a partir de textos de PDFs que podem conter quebras de linha. "
