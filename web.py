@@ -117,6 +117,21 @@ def init_firebase():
 
 init_firebase()
 
+def configure_cors(b):
+    try:
+        b.cors = [
+            {
+                "origin": ["*"],
+                "method": ["GET", "PUT", "POST", "DELETE", "OPTIONS"],
+                "responseHeader": ["Content-Type", "x-goog-resumable"],
+                "maxAgeSeconds": 3600
+            }
+        ]
+        b.update()
+        print("🔥 Firebase: CORS configurado no bucket")
+    except Exception as e:
+        print(f"⚠️ Firebase: Não foi possível atualizar CORS no bucket: {e}")
+
 def get_bucket():
     global bucket, _bucket_resolved
     if not bucket or _bucket_resolved:
@@ -127,6 +142,7 @@ def get_bucket():
         bucket.exists() # Testa o padrão (.firebasestorage.app)
         _bucket_resolved = True
         print(f"🔥 Firebase: Bucket validado com sucesso: {bucket.name}")
+        configure_cors(bucket)
     except Exception as e:
         # Se falhar, tenta o fallback (.appspot.com)
         if bucket.name.endswith(".firebasestorage.app"):
@@ -137,6 +153,7 @@ def get_bucket():
                 bucket = fallback_bucket
                 _bucket_resolved = True
                 print(f"🔥 Firebase: Fallback para o bucket {old_name} com sucesso")
+                configure_cors(bucket)
             except Exception as ex:
                 print(f"⚠️ Firebase: Validação do bucket falhou em ambos os formatos. Usando padrão {bucket.name}. Erro: {ex}")
                 _bucket_resolved = True
@@ -394,6 +411,89 @@ def api_upload(project, kind):
     return jsonify(ok=True, saved=saved)
 
 
+@app.route("/api/upload/signed-url", methods=["POST"])
+def api_upload_signed_url():
+    if not get_bucket():
+        return jsonify(ok=False, firebase_active=False, error="Firebase inativo ou não configurado")
+
+    data = request.json or {}
+    project = data.get("project", "")
+    filename = data.get("filename", "")
+    content_type = data.get("contentType", "")
+    kind = data.get("kind", "")
+
+    if not project or not filename or not kind:
+        return jsonify(ok=False, error="Parâmetros inválidos")
+
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        return jsonify(ok=False, error="Nome de arquivo inválido")
+
+    # Caminho do blob dependendo do tipo
+    if kind == "md":
+        blob_path = f"projects/{secure_filename(project)}/{safe_name}"
+    elif kind == "img":
+        blob_path = f"projects/{secure_filename(project)}/assets/{safe_name}"
+    elif kind == "queue":
+        blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+    else:
+        return jsonify(ok=False, error="Tipo de upload inválido")
+
+    try:
+        from datetime import timedelta
+        b = get_bucket()
+        blob = b.blob(blob_path)
+        
+        # Gerando signed URL v4 com PUT
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(minutes=15),
+            method="PUT",
+            content_type=content_type
+        )
+        return jsonify(ok=True, firebase_active=True, url=url, blob_path=blob_path, safe_name=safe_name)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, firebase_active=True, error=str(e))
+
+
+@app.route("/api/upload/confirm/<project>/<kind>", methods=["POST"])
+def api_upload_confirm(project, kind):
+    data = request.json or {}
+    filename = secure_filename(data.get("filename", ""))
+    
+    if not filename:
+        return jsonify(ok=False, error="Nome de arquivo inválido")
+        
+    b = get_bucket()
+    if not b:
+        return jsonify(ok=False, error="Firebase não está ativo neste ambiente")
+
+    safe_proj = secure_filename(project)
+    
+    if kind == "md":
+        blob_path = f"projects/{safe_proj}/{filename}"
+        local_path = os.path.join(_pdir(safe_proj), filename)
+    elif kind == "img":
+        blob_path = f"projects/{safe_proj}/assets/{filename}"
+        local_path = os.path.join(_adir(safe_proj), filename)
+    else:
+        return jsonify(ok=False, error="Tipo inválido")
+
+    try:
+        os.makedirs(os.path.dirname(local_path), exist_ok=True)
+        blob = b.blob(blob_path)
+        if blob.exists():
+            blob.download_to_filename(local_path)
+            print(f"📥 Firebase: Download pós-upload concluído para {local_path}")
+            return jsonify(ok=True)
+        else:
+            return jsonify(ok=False, error="Blob não encontrado no storage remoto")
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
+
+
 @app.route("/api/delete/<project>/<kind>/<filename>", methods=["DELETE"])
 def api_delete_file(project, kind, filename):
     filename = secure_filename(filename)
@@ -583,6 +683,50 @@ def api_queue_upload(project):
             })
             
     return jsonify(ok=True, files=uploaded_files)
+
+
+@app.route("/api/queue/confirm/<project>", methods=["POST"])
+def api_queue_confirm(project):
+    data = request.json or {}
+    files_info = data.get("files", [])
+    
+    if not files_info:
+        return jsonify(ok=False, error="Nenhum arquivo especificado")
+        
+    b = get_bucket()
+    if not b:
+        return jsonify(ok=False, error="Firebase não está ativo neste ambiente")
+
+    safe_proj = secure_filename(project)
+    project_queue_dir = os.path.join(QUEUE_DIR, safe_proj)
+    os.makedirs(project_queue_dir, exist_ok=True)
+    
+    confirmed_files = []
+    for file_info in files_info:
+        name = file_info.get("name")
+        safe_name = secure_filename(file_info.get("safe_name", ""))
+        ext = file_info.get("type", "")
+        
+        if not safe_name:
+            continue
+            
+        blob_path = f"temp_queue/{safe_proj}/{safe_name}"
+        filepath = os.path.join(project_queue_dir, safe_name)
+        
+        try:
+            blob = b.blob(blob_path)
+            if blob.exists():
+                blob.download_to_filename(filepath)
+                print(f"📥 Firebase: Download pós-upload temporário concluído para {filepath}")
+                confirmed_files.append({
+                    "name": name,
+                    "safe_name": safe_name,
+                    "type": ext
+                })
+        except Exception as e:
+            print(f"❌ Firebase: Erro ao baixar arquivo da fila {safe_name}: {e}")
+            
+    return jsonify(ok=True, files=confirmed_files)
 
 
 @app.route("/api/queue/process/<project>", methods=["POST"])
