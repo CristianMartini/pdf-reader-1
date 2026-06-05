@@ -106,6 +106,24 @@ Ponto importante ou resumo crítico.
 - [ ] Tipografia consistente em todas as páginas
 - [ ] Zero ajuste manual necessário
 
+## 🌐 Arquitetura Web & Persistência em Nuvem (Bypass da Vercel)
+
+Para hospedar o editor web e a fila de inteligência artificial de forma 100% gratuita na Vercel sem sofrer com o limite de request payload de **4.5 MB** do plano gratuito, a aplicação utiliza uma arquitetura de **Direct-to-Storage Upload**:
+
+1. **Signed URLs v4 (`PUT`)**: Quando um arquivo (PDF antigo, documento MD ou imagem) é enviado pela interface, o front-end solicita uma URL Assinada de curta duração (15 minutos) ao backend.
+2. **Upload Direto**: O navegador realiza um `PUT` binário diretamente para a URL fornecida (apontando para `storage.googleapis.com`), enviando o arquivo sem trafegar pela infraestrutura serverless da Vercel.
+3. **CORS Dinâmico**: O backend gerencia e configura automaticamente as regras de CORS (Cross-Origin Resource Sharing) no bucket do Firebase Storage no momento da inicialização do app.
+4. **Sincronização Serverless**: Após o upload direto ser concluído pelo navegador, o backend é notificado e baixa o arquivo do Firebase Storage para o disco temporário do container serverless (`/tmp`) apenas para realizar o processamento com Gemini AI ou compilar o PDF (pypdf/ReportLab).
+
+### Fallback Local/Offline
+Caso a chave do Firebase não esteja configurada no ambiente (como ao rodar localmente sem internet ou sem `serviceAccountKey.json`), o editor reverte automaticamente para o **modo de upload tradicional** via rota Flask (com verificação local de tamanho).
+
+### Variáveis de Ambiente Necessárias (Produção Vercel)
+Para ativar a persistência e uploads ilimitados na Vercel, defina:
+- `FIREBASE_CREDENTIALS`: A string JSON completa da chave de conta de serviço (Service Account Key) do seu projeto Firebase.
+
+---
+
 ## Skills Antigravity Utilizadas
 
 - `python-pro` — código Python moderno e robusto
@@ -113,3 +131,4 @@ Ponto importante ou resumo crítico.
 - `tdd-workflow` — testes do validator e parser
 - `systematic-debugging` — diagnóstico de erros no build
 - `architect-review` — validação da arquitetura do pipeline
+
