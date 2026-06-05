@@ -20,7 +20,23 @@ from werkzeug.utils import secure_filename
 
 # ── Base ──
 BASE     = os.path.dirname(os.path.abspath(__file__))
-PROJECTS = os.path.join(BASE, "projects")
+if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"):
+    PROJECTS = "/tmp/projects"
+    # Copy repository pre-existing projects to /tmp/projects so they are available and editable
+    os.makedirs(PROJECTS, exist_ok=True)
+    repo_projects = os.path.join(BASE, "projects")
+    if os.path.isdir(repo_projects):
+        for item in os.listdir(repo_projects):
+            s_path = os.path.join(repo_projects, item)
+            d_path = os.path.join(PROJECTS, item)
+            if os.path.isdir(s_path) and not os.path.exists(d_path):
+                try:
+                    shutil.copytree(s_path, d_path)
+                except Exception as e:
+                    print(f"Warning: Failed to copy {s_path} to {d_path}: {e}")
+else:
+    PROJECTS = os.path.join(BASE, "projects")
+
 TMPL_DIR = os.path.join(BASE, "templates")
 
 app = Flask(__name__, template_folder=TMPL_DIR)
