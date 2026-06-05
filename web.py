@@ -773,36 +773,41 @@ def api_queue_extract(project):
         return jsonify(ok=False, error=str(e))
 
 
-@app.route("/api/queue/rewrite", methods=["POST"])
-def api_queue_rewrite():
-    data = request.json or {}
-    text = data.get("text", "")
-    if not text.strip():
-        return jsonify(ok=False, error="Texto vazio")
-        
+@app.route("/api/config/gemini", methods=["GET"])
+def api_config_gemini():
+    from ai.gemini_client import load_prompt, API_KEY
     try:
-        from ai.gemini_client import rewrite_content_to_style
-        draft = rewrite_content_to_style(text)
-        return jsonify(ok=True, draft=draft)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify(ok=False, error=str(e))
-
-
-@app.route("/api/queue/review", methods=["POST"])
-def api_queue_review():
-    data = request.json or {}
-    draft = data.get("draft", "")
-    if not draft.strip():
-        return jsonify(ok=False, error="Rascunho vazio")
+        base_prompt = load_prompt()
+    except Exception:
+        base_prompt = ""
         
-    try:
-        from ai.gemini_client import review_and_polish_markdown
-        final = review_and_polish_markdown(draft)
-        return jsonify(ok=True, final=final)
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify(ok=False, error=str(e))
+    key = os.environ.get("GEMINI_API_KEY", API_KEY)
+    
+    review_instructions = (
+        "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
+        "Sua missão é ler o rascunho de aula em Markdown abaixo e realizar uma revisão cirúrgica e rigorosa para deixá-lo impecável.\n\n"
+        "DIRETRIZES DE REVISÃO:\n"
+        "1. CORREÇÃO GRAMATICAL: Corrija quaisquer erros ortográficos, concordância e digitação.\n"
+        "2. NÃO UNIR CABEÇALHOS AO TEXTO: O rascunho foi gerado a partir de textos de PDFs que podem conter quebras de linha. "
+        "ATENÇÃO CRÍTICA: NUNCA una uma linha que começa com cabeçalhos (#, ##, ###, ####) à linha seguinte! Os títulos devem sempre ficar em suas próprias linhas, isolados. "
+        "Se o rascunho contiver cabeçalhos colados na mesma linha que o texto do parágrafo seguinte (ex: '#### Sinais Duvidosos de Conjunção Carnal São indicativos que...'), "
+        "corrija obrigatoriamente inserindo uma quebra de linha dupla (uma linha em branco) de forma que o título fique isolado (ex:\n"
+        "#### Sinais Duvidosos de Conjunção Carnal\n\nSão indicativos que...).\n"
+        "3. UNIR FRASES TRUNCADAS: Una frases no corpo dos parágrafos normais que parecem cortadas ou palavras grudadas de forma inadequada devido a quebras de páginas (ex: se encontrar algo como 'aborto.usta e ética da lei', corrija para 'aborto. A busca justa e ética da lei').\n"
+        "4. SANITIZAÇÃO DE MARCAÇÕES: Remova crases ou caracteres de código das marcações especiais do nosso parser de PDF. "
+        "Exemplo: se encontrar `[BOX]` ou `[/BOX]` com crases/backticks, remova as crases e garanta que fiquem puras em linhas isoladas: [BOX] e [/BOX]. "
+        "Faça o mesmo para as tags de imagem: `[IMG:nome.jpg]` deve se tornar apenas [IMG:nome.jpg] sem crases.\n"
+        "5. REMOVER LEGENDAS DE IMAGEM AUTOMÁTICAS: Remova qualquer legenda de imagem, descrição ou nota textual em itálico/negrito (como *Ilustração de...* ou *Legenda...*) gerada automaticamente logo abaixo ou acima das tags [IMG:...]. As tags de imagem devem aparecer totalmente isoladas em suas próprias linhas sem qualquer texto explicativo associado.\n"
+        "6. NÃO ALUCINE: Mantenha todo o conteúdo didático, técnico, exercícios e formatação de cabeçalho YAML intactos. Apenas lapide a escrita e corrija as falhas de formatação/junção.\n"
+        "7. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
+    )
+    
+    return jsonify(
+        ok=True,
+        key=key,
+        base_prompt=base_prompt,
+        review_instructions=review_instructions
+    )
 
 
 @app.route("/api/queue/save/<project>", methods=["POST"])
