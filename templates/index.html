@@ -481,28 +481,99 @@ async function clearImages() {
 
 async function uploadFile(input, kind) {
   if (!input.files.length || !proj) return;
-  const isVercel = window.location.hostname.endsWith('.vercel.app');
-  if (isVercel) {
-    let totalSize = 0;
-    for (let i = 0; i < input.files.length; i++) {
-      totalSize += input.files[i].size;
-    }
-    if (totalSize > 4.5 * 1024 * 1024) {
-      toast("❌ Limite de 4.5MB excedido (restrição do Vercel). Faça upload local ou envie arquivos menores.", "error");
-      input.value = "";
-      return;
+  
+  const files = Array.from(input.files);
+  let uploadSuccessCount = 0;
+  let singleMdLoadedName = null;
+  
+  toast("Iniciando upload...", "success");
+  
+  for (let fObj of files) {
+    try {
+      // 1. Tenta obter Signed URL do backend
+      const resSig = await fetch("/api/upload/signed-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: proj,
+          filename: fObj.name,
+          contentType: fObj.type || "application/octet-stream",
+          kind: kind
+        })
+      });
+      const dataSig = await resSig.json();
+      
+      if (dataSig.ok && dataSig.firebase_active && dataSig.url) {
+        // Firebase active: upload directly to Firebase Storage (bypasses Vercel 4.5MB limit)
+        const uploadRes = await fetch(dataSig.url, {
+          method: "PUT",
+          headers: {
+            "Content-Type": fObj.type || "application/octet-stream"
+          },
+          body: fObj
+        });
+        
+        if (!uploadRes.ok) {
+          throw new Error(`Erro HTTP no upload direto: ${uploadRes.statusText}`);
+        }
+        
+        // Confirm upload with backend so it downloads the file to the local container
+        const confirmRes = await fetch(`/api/upload/confirm/${encodeURIComponent(proj)}/${kind}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename: dataSig.safe_name })
+        });
+        const dataConfirm = await confirmRes.json();
+        
+        if (dataConfirm.ok) {
+          uploadSuccessCount++;
+          if (kind === 'md' && files.length === 1) {
+            singleMdLoadedName = dataSig.safe_name;
+          }
+        } else {
+          throw new Error(`Erro na confirmação: ${dataConfirm.error}`);
+        }
+      } else {
+        // Fallback: Firebase inactive or error. Standard upload via Flask
+        const isVercel = window.location.hostname.endsWith('.vercel.app');
+        if (isVercel && fObj.size > 4.5 * 1024 * 1024) {
+          toast(`❌ Arquivo ${fObj.name} excede o limite de 4.5MB da Vercel (sem Firebase).`, "error");
+          continue;
+        }
+        
+        const fd = new FormData();
+        fd.append("files", fObj);
+        const r = await fetch(`/api/upload/${encodeURIComponent(proj)}/${kind}`, {
+          method: "POST",
+          body: fd
+        });
+        const d = await r.json();
+        
+        if (d.ok) {
+          uploadSuccessCount += d.saved;
+          if (kind === 'md' && files.length === 1) {
+            singleMdLoadedName = fObj.name;
+          }
+        } else {
+          throw new Error(d.error || "Erro no upload tradicional");
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      toast(`❌ Erro no upload de ${fObj.name}: ${err.message}`, "error");
     }
   }
-  const fd = new FormData();
-  for (let i=0;i<input.files.length;i++) fd.append("files", input.files[i]);
-  const r = await fetch(`/api/upload/${encodeURIComponent(proj)}/${kind}`, {method:"POST",body:fd});
-  const d = await r.json();
-  if (d.ok) {
-    toast(`✅ ${d.saved} arquivo(s) enviado(s)`,"success");
-    _mdSig = _imgSig = ""; loadFiles(true); loadProjects();
-    if (kind==='md' && input.files.length===1) loadFile(input.files[0].name);
+  
+  if (uploadSuccessCount > 0) {
+    toast(`✅ ${uploadSuccessCount} arquivo(s) enviado(s)`, "success");
+    _mdSig = _imgSig = ""; 
+    await loadFiles(true); 
+    loadProjects();
+    if (kind === 'md' && files.length === 1 && singleMdLoadedName) {
+      loadFile(singleMdLoadedName);
+    }
   }
-  input.value="";
+  input.value = "";
 }
 
 // ══ GERAR PDF ══
@@ -631,51 +702,136 @@ function toast(msg, type="success") {
 // ══ FILA DE PROCESSAMENTO COM IA ══
 async function addFilesToQueue(input) {
   if (!input.files.length || !proj) return;
-  const isVercel = window.location.hostname.endsWith('.vercel.app');
-  if (isVercel) {
-    let totalSize = 0;
-    for (let i = 0; i < input.files.length; i++) {
-      totalSize += input.files[i].size;
-    }
-    if (totalSize > 4.5 * 1024 * 1024) {
-      toast("❌ Limite de 4.5MB excedido (restrição do Vercel). Faça upload local ou envie arquivos menores.", "error");
-      input.value = "";
-      return;
-    }
-  }
-  const fd = new FormData();
-  for (let i = 0; i < input.files.length; i++) {
-    fd.append("files", input.files[i]);
-  }
   
-  toast("Enviando arquivos para a fila...", "success");
+  const files = Array.from(input.files);
+  const filesToConfirm = [];
+  const filesToTraditionalUpload = [];
   
-  try {
-    const r = await fetch(`/api/queue/upload/${encodeURIComponent(proj)}`, {
-      method: "POST",
-      body: fd
-    });
-    const d = await r.json();
-    
-    if (d.ok) {
-      d.files.forEach(f => {
-        uploadQueue.push({
-          name: f.name,
-          safe_name: f.safe_name,
-          type: f.type,
-          status: "pending",
-          error: null,
-          saved_as: null,
-          checked: true
-        });
+  toast("Iniciando uploads para a fila...", "success");
+  
+  for (let fObj of files) {
+    try {
+      // 1. Tenta obter Signed URL para a fila temporária
+      const resSig = await fetch("/api/upload/signed-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: proj,
+          filename: fObj.name,
+          contentType: fObj.type || "application/octet-stream",
+          kind: "queue"
+        })
       });
-      toast(`✅ ${d.files.length} arquivos na fila`, "success");
-      renderQueue();
-    } else {
-      toast("❌ Erro ao adicionar arquivos: " + d.error, "error");
+      const dataSig = await resSig.json();
+      
+      if (dataSig.ok && dataSig.firebase_active && dataSig.url) {
+        // Firebase active: upload directly to Firebase Storage (bypasses Vercel 4.5MB limit)
+        const uploadRes = await fetch(dataSig.url, {
+          method: "PUT",
+          headers: {
+            "Content-Type": fObj.type || "application/octet-stream"
+          },
+          body: fObj
+        });
+        
+        if (!uploadRes.ok) {
+          throw new Error(`Erro HTTP no upload direto: ${uploadRes.statusText}`);
+        }
+        
+        const ext = fObj.name.split('.').pop().toLowerCase();
+        filesToConfirm.push({
+          name: fObj.name,
+          safe_name: dataSig.safe_name,
+          type: ext
+        });
+      } else {
+        // Fallback: Firebase inactive or error. Add to traditional upload list
+        filesToTraditionalUpload.push(fObj);
+      }
+    } catch (err) {
+      console.error(err);
+      toast("❌ Erro ao enviar para o Storage: " + err.message, "error");
     }
-  } catch (err) {
-    toast("❌ Falha de rede no upload", "error");
+  }
+  
+  // 2. Confirm direct uploads with backend
+  if (filesToConfirm.length > 0) {
+    try {
+      const confirmRes = await fetch(`/api/queue/confirm/${encodeURIComponent(proj)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: filesToConfirm })
+      });
+      const dataConfirm = await confirmRes.json();
+      
+      if (dataConfirm.ok && dataConfirm.files) {
+        dataConfirm.files.forEach(f => {
+          uploadQueue.push({
+            name: f.name,
+            safe_name: f.safe_name,
+            type: f.type,
+            status: "pending",
+            error: null,
+            saved_as: null,
+            checked: true
+          });
+        });
+        toast(`✅ ${dataConfirm.files.length} arquivos na fila`, "success");
+        renderQueue();
+      } else {
+        toast("❌ Erro ao confirmar arquivos no servidor", "error");
+      }
+    } catch (err) {
+      toast("❌ Falha de rede na confirmação da fila", "error");
+    }
+  }
+  
+  // 3. Process traditional uploads (if any)
+  if (filesToTraditionalUpload.length > 0) {
+    const isVercel = window.location.hostname.endsWith('.vercel.app');
+    let traditionalAllowed = true;
+    
+    if (isVercel) {
+      let totalSize = 0;
+      for (let fObj of filesToTraditionalUpload) totalSize += fObj.size;
+      if (totalSize > 4.5 * 1024 * 1024) {
+        toast("❌ Limite de 4.5MB excedido nos arquivos restantes (restrição do Vercel).", "error");
+        traditionalAllowed = false;
+      }
+    }
+    
+    if (traditionalAllowed) {
+      const fd = new FormData();
+      for (let fObj of filesToTraditionalUpload) fd.append("files", fObj);
+      
+      try {
+        const r = await fetch(`/api/queue/upload/${encodeURIComponent(proj)}`, {
+          method: "POST",
+          body: fd
+        });
+        const d = await r.json();
+        
+        if (d.ok) {
+          d.files.forEach(f => {
+            uploadQueue.push({
+              name: f.name,
+              safe_name: f.safe_name,
+              type: f.type,
+              status: "pending",
+              error: null,
+              saved_as: null,
+              checked: true
+            });
+          });
+          toast(`✅ ${d.files.length} arquivos adicionados à fila`, "success");
+          renderQueue();
+        } else {
+          toast("❌ Erro no upload tradicional: " + d.error, "error");
+        }
+      } catch (err) {
+        toast("❌ Falha de rede no upload tradicional", "error");
+      }
+    }
   }
   
   input.value = "";
