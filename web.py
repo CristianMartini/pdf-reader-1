@@ -341,16 +341,26 @@ def api_list_projects():
     items = []
     project_names = set()
     
-    # 1. Get local projects
+    # 1. Get remote Firebase projects first
+    remote_projs = firebase_list_projects()
+    for name in remote_projs:
+        project_names.add(name)
+        
+    # 2. Get local projects & upload .keep if not on Firebase
     if os.path.isdir(PROJECTS):
         for entry in os.scandir(PROJECTS):
             if entry.is_dir() and not entry.name.startswith("."):
                 project_names.add(entry.name)
-                
-    # 2. Get remote Firebase projects
-    remote_projs = firebase_list_projects()
-    for name in remote_projs:
-        project_names.add(name)
+                # Se o projeto local ainda não existe no Firebase, cria/garante .keep e faz upload
+                if entry.name not in remote_projs:
+                    keep_path = os.path.join(entry.path, ".keep")
+                    try:
+                        if not os.path.exists(keep_path):
+                            with open(keep_path, "w", encoding="utf-8") as f:
+                                f.write("")
+                        _upload_file_to_firebase(entry.name, ".keep", is_asset=False)
+                    except Exception:
+                        pass
         
     for name in sorted(project_names):
         # Sincroniza do Firebase antes de ler a contagem de mds e pdfs
@@ -374,6 +384,16 @@ def api_create_project():
     pd = _pdir(safe)
     os.makedirs(pd, exist_ok=True)
     os.makedirs(_adir(safe), exist_ok=True)
+    
+    # Criar e fazer o upload do arquivo .keep para garantir persistência no Firebase Storage
+    keep_path = os.path.join(pd, ".keep")
+    try:
+        with open(keep_path, "w", encoding="utf-8") as f:
+            f.write("")
+        _upload_file_to_firebase(safe, ".keep", is_asset=False)
+    except Exception as e:
+        print(f"⚠️ Firebase: Não foi possível subir o .keep inicial: {e}")
+        
     return jsonify(ok=True, name=safe)
 
 
