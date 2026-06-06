@@ -96,6 +96,48 @@ def _cover_path(assets: str):
     return None
 
 
+def _find_image_file(name: str, assets_dir: str, md_dir: str) -> str:
+    """Busca imagem no assets ou md_dir, com fallback para correspondência aproximada."""
+    name = name.strip()
+    if not name:
+        return None
+        
+    candidates = [
+        os.path.join(assets_dir, name),
+        os.path.join(md_dir, name),
+    ]
+    for c in candidates:
+        if os.path.exists(c) and os.path.isfile(c):
+            return c
+            
+    # Fallback: busca aproximada na pasta de assets e md_dir
+    def clean_name(n):
+        n = os.path.splitext(n)[0].lower()
+        n = ''.join(c for c in unicodedata.normalize('NFD', n) if unicodedata.category(c) != 'Mn')
+        return re.sub(r'[^a-z0-9]', '', n)
+        
+    target_clean = clean_name(name)
+    if not target_clean:
+        return None
+        
+    # Procurar em assets e md_dir
+    for search_dir in (assets_dir, md_dir):
+        if not search_dir or not os.path.isdir(search_dir):
+            continue
+        try:
+            for filename in os.listdir(search_dir):
+                file_path = os.path.join(search_dir, filename)
+                if os.path.isfile(file_path):
+                    file_clean = clean_name(filename)
+                    if target_clean == file_clean or target_clean in file_clean or file_clean in target_clean:
+                        print(f"🔍 Match aproximado de imagem: sugerido '{name}' -> encontrado '{filename}'")
+                        return file_path
+        except Exception as e:
+            print(f"Erro na busca aproximada de imagem: {e}")
+            
+    return None
+
+
 def _logo_mask(path: str):
     """
     JPEG não tem canal alpha — usar mask=None.
@@ -176,6 +218,34 @@ BOX  = ParagraphStyle("BOX",  fontName=FONT_REG, fontSize=11,
                       textColor=NAVY, spaceAfter=10, spaceBefore=8)
 CAPTION = ParagraphStyle("CAPTION", fontName=FONT_REG, fontSize=9,
                           textColor=GRAY, alignment=1, spaceAfter=6)
+IMG_PLACEHOLDER_STYLE = ParagraphStyle(
+    "IMG_PLACEHOLDER_STYLE",
+    fontName=FONT_REG,
+    fontSize=10.5,
+    leading=15,
+    textColor=colors.HexColor("#4A5568"),
+    backColor=colors.HexColor("#F7FAFC"),
+    borderColor=colors.HexColor("#CBD5E0"),
+    borderWidth=1,
+    borderPadding=12,
+    spaceBefore=12,
+    spaceAfter=12,
+    alignment=1
+)
+IMG_COL_PLACEHOLDER_STYLE = ParagraphStyle(
+    "IMG_COL_PLACEHOLDER_STYLE",
+    fontName=FONT_REG,
+    fontSize=9.5,
+    leading=13,
+    textColor=colors.HexColor("#4A5568"),
+    backColor=colors.HexColor("#F7FAFC"),
+    borderColor=colors.HexColor("#CBD5E0"),
+    borderWidth=1,
+    borderPadding=8,
+    spaceBefore=4,
+    spaceAfter=4,
+    alignment=1
+)
 
 
 # ════════════════════════════════════════
@@ -349,6 +419,11 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
     # ── Remover front-matter YAML (--- ... ---) antes de parsear linha a linha ──
     content = re.sub(r'^\s*---\s*\n.*?\n---\s*\n', '', raw_content, count=1, flags=re.DOTALL | re.MULTILINE)
 
+    # Remover sugestões de imagens instrucionais multilinhas (ex: [INSIRA UMA IMAGEM AQUI: ...])
+    # Mantém a nossa tag de imagem válida [IMG:...]
+    pattern = r'\[\s*(?:INSIRA|INSERIR|IMAGEM|SUGEST[AÃ]O|IMAGE|PHOTO|FIGURA|ILUSTRA[CÇ][AÃ]O|DIAGRAMA)\b[^\]]*\]'
+    content = re.sub(pattern, '', content, flags=re.IGNORECASE)
+
     lines = content.splitlines()
 
     for raw in lines:
@@ -361,6 +436,13 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             continue
 
         line = line.strip()
+
+        # Limpa blockquotes '>' vazados
+        if line.startswith(">"):
+            line = re.sub(r'^(\s*>)+', '', line).strip()
+            if not line:
+                continue
+
         clean_line = line.replace("`", "").strip()
 
         # BOX abertura
@@ -414,63 +496,86 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             bracket_end = line.find("]")
             if bracket_end == -1:
                 continue
-            names = line[5:bracket_end].strip().split("|")
+            
+            names_str = line[5:bracket_end].strip()
+            names = names_str.split("|")
+            
+            # Extrai legenda / descrição instrucional
+            desc = line[bracket_end + 1:].strip()
+            if desc.startswith("(") and desc.endswith(")"):
+                desc = desc[1:-1].strip()
+                
             md_dir = os.path.dirname(md_path)
             
-            loaded_imgs = []
-            for name in names:
-                name = name.strip()
-                candidates = [
-                    os.path.join(assets, name),
-                    os.path.join(md_dir, name),
-                ]
-                img_p = next((p for p in candidates if os.path.exists(p)), None)
-                if img_p:
-                    try:
-                        processed = _preprocess_image(img_p)
-                        img = Image(processed)
-                        loaded_imgs.append(img)
-                    except Exception:
-                        pass
-            
-            if not loaded_imgs:
-                continue
+            if len(names) == 1:
+                name_item = names[0].strip()
+                img_path = _find_image_file(name_item, assets, md_dir)
                 
-            if len(loaded_imgs) == 1:
-                # Uma imagem - Tamanho otimizado para material educacional (menor que a largura total)
-                img = loaded_imgs[0]
-                img._restrictSize(11 * cm, 10 * cm)  # Largura ~70% da área útil, altura moderada
-                img.hAlign = "CENTER"
-                story.append(KeepTogether([
-                    Spacer(1, 10),
-                    img,
-                    Spacer(1, 10),
-                ]))
-            elif len(loaded_imgs) >= 2:
-                # Duas imagens lado a lado
-                img1 = loaded_imgs[0]
-                img2 = loaded_imgs[1]
-                # Largura útil = W - 5cm. Vamos colocar um gap de 1cm no meio.
+                if img_path:
+                    try:
+                        processed = _preprocess_image(img_path)
+                        img = Image(processed)
+                        img._restrictSize(11 * cm, 10 * cm)
+                        img.hAlign = "CENTER"
+                        
+                        elements = [Spacer(1, 10), img]
+                        if desc:
+                            elements.append(Spacer(1, 4))
+                            elements.append(Paragraph(f"<b>Figura:</b> {desc}", CAPTION))
+                        elements.append(Spacer(1, 10))
+                        
+                        story.append(KeepTogether(elements))
+                    except Exception as e:
+                        print(f"Erro ao processar imagem real: {e}")
+            else:
+                # Imagem dupla ou múltipla
+                col_elements = []
                 gap = 1.0 * cm
                 col_w = (W - 5 * cm - gap) / 2
                 
-                img1._restrictSize(col_w, 8 * cm)
-                img1.hAlign = "CENTER"
-                img2._restrictSize(col_w, 8 * cm)
-                img2.hAlign = "CENTER"
+                for name_item in names[:2]:
+                    name_item = name_item.strip()
+                    img_path = _find_image_file(name_item, assets, md_dir)
+                    if img_path:
+                        try:
+                            processed = _preprocess_image(img_path)
+                            img = Image(processed)
+                            img._restrictSize(col_w, 8 * cm)
+                            img.hAlign = "CENTER"
+                            col_elements.append(img)
+                        except Exception:
+                            pass
                 
-                # Tabela de 3 colunas: imagem 1, espaço vazio, imagem 2
-                t = Table([[img1, "", img2]], colWidths=[col_w, gap, col_w])
-                t.setStyle(TableStyle([
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ]))
-                
-                story.append(KeepTogether([
-                    Spacer(1, 10),
-                    t,
-                    Spacer(1, 10),
-                ]))
+                if not col_elements:
+                    continue
+                    
+                if len(col_elements) == 1:
+                    # Apenas uma encontrada - renderiza como única
+                    img = col_elements[0]
+                    img._restrictSize(11 * cm, 10 * cm)
+                    img.hAlign = "CENTER"
+                    
+                    elements = [Spacer(1, 10), img]
+                    if desc:
+                        elements.append(Spacer(1, 4))
+                        elements.append(Paragraph(f"<b>Figura:</b> {desc}", CAPTION))
+                    elements.append(Spacer(1, 10))
+                    story.append(KeepTogether(elements))
+                else:
+                    # Ambas encontradas - renderiza lado a lado
+                    t = Table([[col_elements[0], "", col_elements[1]]], colWidths=[col_w, gap, col_w])
+                    t.setStyle(TableStyle([
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ]))
+                    
+                    elements = [Spacer(1, 10), t]
+                    if desc:
+                        elements.append(Spacer(1, 4))
+                        elements.append(Paragraph(f"<b>Figura:</b> {desc}", CAPTION))
+                    elements.append(Spacer(1, 10))
+                    
+                    story.append(KeepTogether(elements))
             continue
 
         # Parágrafo de texto
@@ -548,7 +653,7 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
         onFirstPage=lambda c, d: header_footer(c, d, assets_dir),
         onLaterPages=lambda c, d: header_footer(c, d, assets_dir),
     )
-    print(f"  ✅ {os.path.basename(output_path)}")
+    print(f"  [OK] {os.path.basename(output_path)}")
     return output_path
 
 

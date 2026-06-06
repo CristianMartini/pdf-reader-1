@@ -23,6 +23,7 @@ materia: Nome da Disciplina ou Curso
 - **Quebras de Linha**: Insira exatamente UMA linha em branco (uma quebra de linha dupla) após cada título/subtítulo, antes de iniciar o parágrafo seguinte.
 - **Parágrafos**: Sem recuo manual na primeira linha. Separe parágrafos com exatamente UMA linha em branco. O alinhamento será justificado automaticamente pela engine.
 - **Listas**: Use exclusivamente o traço padrão: `- Item da lista`.
+- **PROIBIÇÃO DE BLOCKQUOTES (`>`)**: NUNCA utilize o caractere `>` no início das linhas para fazer citações ou destacar blocos de texto (blockquotes). Toda citação ou destaque deve ser estruturada como texto normal ou dentro das tags de destaque `[BOX]` e `[/BOX]`.
 
 ### 4. DESTAQUES EXCLUSIVOS (BLOCO BOX)
 Utilize blocos `[BOX]` para destacar definições críticas, conceitos-chave fundamentais ou resumos de alto impacto. Insira pelo menos dois blocos `[BOX]` ao longo da aula.
