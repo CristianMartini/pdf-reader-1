@@ -1000,6 +1000,15 @@ function sanitizeMarkdown(txt) {
       clean = clean.substring(yamlStartIndex).trim();
     }
   }
+
+  // 3. Remove caracteres de blockquote (>) do início de linhas
+  clean = clean.split('\n').map(line => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('>')) {
+      return line.replace(/^(\s*>)+/, "").trimStart();
+    }
+    return line;
+  }).join('\n');
   
   return clean;
 }
