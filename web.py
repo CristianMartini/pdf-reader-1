@@ -110,52 +110,51 @@ LAST_SYNCED = {}
 
 def init_firebase():
     global firebase_app, bucket
-    if firebase_admin._apps:
-        firebase_app = firebase_admin.get_app()
+    
+    # 1. Resolve credentials and project_id first
+    cred = None
+    project_id = None
+    service_key_path = os.path.join(BASE, "serviceAccountKey.json")
+    
+    # Try environment variable (either from .env locally or Vercel dashboard in production)
+    if os.environ.get("FIREBASE_CREDENTIALS"):
         try:
-            bucket = storage.bucket(app=firebase_app)
-        except Exception:
-            pass
-    else:
-        cred = None
-        project_id = None
-        service_key_path = os.path.join(BASE, "serviceAccountKey.json")
-        
-        # 1. Try environment variable (either from .env locally or Vercel dashboard in production)
-        if os.environ.get("FIREBASE_CREDENTIALS"):
-            try:
-                cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
-                cred = credentials.Certificate(cred_json)
-                project_id = cred_json.get("project_id")
-                print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS")
-            except Exception as e:
-                print(f"❌ Firebase: Erro ao ler FIREBASE_CREDENTIALS env: {e}")
-                
-        # 2. Try local serviceAccountKey.json file
-        elif os.path.exists(service_key_path):
-            try:
-                cred = credentials.Certificate(service_key_path)
-                with open(service_key_path, "r", encoding="utf-8") as f:
-                    project_id = json.load(f).get("project_id")
-                print("🔥 Firebase: Carregando chave de serviceAccountKey.json")
-            except Exception as e:
-                print(f"❌ Firebase: Erro ao ler serviceAccountKey.json: {e}")
-                
-        if cred:
-            try:
-                if project_id:
-                    firebase_app = firebase_admin.initialize_app(cred)
-                    
-                    # Inicializa o bucket padrão sem fazer chamadas de rede no startup
-                    bucket_name = f"{project_id}.firebasestorage.app"
-                    bucket = storage.bucket(name=bucket_name, app=firebase_app)
-                    print(f"🔥 Firebase: Inicializado com bucket padrão {bucket_name}")
-                else:
-                    print("❌ Firebase: project_id não encontrado nos arquivos de credencial")
-            except Exception as e:
-                print(f"❌ Firebase: Falha na inicialização: {e}")
+            cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
+            cred = credentials.Certificate(cred_json)
+            project_id = cred_json.get("project_id")
+            print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS env")
+        except Exception as e:
+            print(f"❌ Firebase: Erro ao ler FIREBASE_CREDENTIALS env: {e}")
+    # Try local file
+    elif os.path.exists(service_key_path):
+        try:
+            cred = credentials.Certificate(service_key_path)
+            with open(service_key_path, "r", encoding="utf-8") as f:
+                project_id = json.load(f).get("project_id")
+            print("🔥 Firebase: Carregando chave de serviceAccountKey.json")
+        except Exception as e:
+            print(f"❌ Firebase: Erro ao ler serviceAccountKey.json: {e}")
+            
+    if not cred or not project_id:
+        print("⚠️ Firebase: Nenhuma credencial ou project_id encontrado. Rodando apenas em modo local.")
+        return
+
+    bucket_name = f"{project_id}.firebasestorage.app"
+    
+    # 2. Initialize or retrieve the app
+    try:
+        if firebase_admin._apps:
+            firebase_app = firebase_admin.get_app()
         else:
-            print("⚠️ Firebase: Nenhuma credencial encontrada. Rodando apenas em modo local.")
+            firebase_app = firebase_admin.initialize_app(cred, {
+                "storageBucket": bucket_name
+            })
+        
+        # Always get the bucket with the explicit name to be safe
+        bucket = storage.bucket(name=bucket_name, app=firebase_app)
+        print(f"🔥 Firebase: Inicializado com bucket {bucket_name}")
+    except Exception as e:
+        print(f"❌ Firebase: Falha na inicialização: {e}")
 
 init_firebase()
 
@@ -172,7 +171,7 @@ def configure_cors(b):
         b.update()
         print("🔥 Firebase: CORS configurado no bucket")
     except Exception as e:
-        print(f"⚠️ Firebase: Não foi possível atualizar CORS no bucket: {e}")
+        print(f"⚠️ Firebase: Não foi possível atualizar CORS no bucket (esperado em chaves restritas): {e}")
 
 def get_bucket():
     global bucket, _bucket_resolved
@@ -186,7 +185,20 @@ def get_bucket():
         print(f"🔥 Firebase: Bucket validado com sucesso: {bucket.name}")
         configure_cors(bucket)
     except Exception as e:
-        # Se falhar, tenta o fallback (.appspot.com)
+        # Check if the error is a 403 Forbidden (Permission Denied).
+        # Standard Firebase keys might lack getBucket metadata permission but can still read/write blobs.
+        is_forbidden = False
+        if hasattr(e, "code") and e.code == 403:
+            is_forbidden = True
+        elif "403" in str(e):
+            is_forbidden = True
+            
+        if is_forbidden:
+            print(f"🔥 Firebase: Bucket {bucket.name} retornou 403 (Permissão restrita de metadados, mas aceita uploads). Mantendo.")
+            _bucket_resolved = True
+            return bucket
+            
+        # If it was a 404 (Not Found) or other error, and was the default bucket, try the fallback (.appspot.com)
         if bucket.name.endswith(".firebasestorage.app"):
             old_name = bucket.name.replace(".firebasestorage.app", ".appspot.com")
             try:
@@ -197,8 +209,24 @@ def get_bucket():
                 print(f"🔥 Firebase: Fallback para o bucket {old_name} com sucesso")
                 configure_cors(bucket)
             except Exception as ex:
-                print(f"⚠️ Firebase: Validação do bucket falhou em ambos os formatos. Usando padrão {bucket.name}. Erro: {ex}")
+                fallback_forbidden = False
+                if hasattr(ex, "code") and ex.code == 403:
+                    fallback_forbidden = True
+                elif "403" in str(ex):
+                    fallback_forbidden = True
+                    
+                if fallback_forbidden:
+                    bucket = fallback_bucket
+                    print(f"🔥 Firebase: Fallback bucket {bucket.name} retornou 403. Mantendo.")
+                else:
+                    # Se tudo falhar, restaura o padrão e não fica tentando em cada request
+                    # (isso evita timeouts recorrentes no Vercel causados por validações repetidas)
+                    bucket = storage.bucket(name=bucket.name, app=firebase_app)
+                    print(f"⚠️ Firebase: Validação falhou em ambos os formatos. Mantendo padrão {bucket.name}. Erro: {ex}")
                 _bucket_resolved = True
+        else:
+            _bucket_resolved = True
+            
     return bucket
 
 
@@ -376,17 +404,17 @@ def api_list_projects():
                         _upload_file_to_firebase(entry.name, ".keep", is_asset=False)
                     except Exception:
                         pass
-        
+    
+    b = get_bucket()
     for name in sorted(project_names):
-        # Conta de arquivos: prioriza disco local, com fallback para Firebase metadata (sem download)
-        pd = _pdir(name)
-        if os.path.isdir(pd):
-            mds  = len(glob.glob(os.path.join(pd, "*.md")))
-            pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
-        else:
+        if b:
             counts = _firebase_count_files(name)
             mds = counts["mds"]
             pdfs = counts["pdfs"]
+        else:
+            pd = _pdir(name)
+            mds  = len(glob.glob(os.path.join(pd, "*.md")))
+            pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
         items.append({"name": name, "mds": mds, "pdfs": pdfs})
         
     return jsonify(projects=items)
@@ -894,6 +922,53 @@ def api_config_gemini():
         base_prompt=base_prompt,
         review_instructions=review_instructions
     )
+
+
+@app.route("/api/debug/firebase", methods=["GET"])
+def api_debug_firebase():
+    info = {
+        "is_vercel": is_vercel(),
+        "firebase_initialized": firebase_admin._apps is not None and len(firebase_admin._apps) > 0,
+        "env_firebase_credentials_present": "FIREBASE_CREDENTIALS" in os.environ,
+        "env_firebase_credentials_length": len(os.environ.get("FIREBASE_CREDENTIALS", "")),
+        "local_service_account_exists": os.path.exists(os.path.join(BASE, "serviceAccountKey.json")),
+        "gemini_api_key_present": "GEMINI_API_KEY" in os.environ or os.environ.get("GEMINI_API_KEY") is not None,
+    }
+    
+    cred_error = None
+    parsed_proj_id = None
+    if info["env_firebase_credentials_present"]:
+        try:
+            cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
+            parsed_proj_id = cred_json.get("project_id")
+            info["parsed_project_id"] = parsed_proj_id
+            info["parsed_keys"] = list(cred_json.keys())
+        except Exception as e:
+            cred_error = f"JSON load error: {str(e)}"
+            info["parse_error"] = cred_error
+            
+    b = get_bucket()
+    if b:
+        info["bucket_name"] = b.name
+        info["bucket_resolved"] = _bucket_resolved
+        try:
+            from datetime import timedelta
+            blob = b.blob("test_diagnostic.txt")
+            url = blob.generate_signed_url(
+                version="v4",
+                expiration=timedelta(minutes=5),
+                method="PUT",
+                content_type="text/plain"
+            )
+            info["signed_url_generation_ok"] = True
+        except Exception as e:
+            info["signed_url_generation_ok"] = False
+            info["signed_url_error"] = str(e)
+    else:
+        info["bucket_name"] = None
+        info["bucket_resolved"] = False
+        
+    return jsonify(info)
 
 
 @app.route("/api/queue/save/<project>", methods=["POST"])
