@@ -5,6 +5,7 @@ SDK: google-genai (pip install google-genai)
 """
 
 import os
+import re
 import time
 import random
 import traceback
@@ -32,6 +33,37 @@ if not API_KEY:
 client = genai.Client(api_key=API_KEY)
 
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompt.md")
+
+
+def sanitize_markdown(text: str) -> str:
+    if not text:
+        return ""
+    clean = text.strip()
+    
+    # 1. Remove cercas de código markdown (```markdown ... ```)
+    clean = re.sub(r'^```markdown\s*', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'^```\s*', '', clean)
+    clean = re.sub(r'\s*```$', '', clean)
+    clean = clean.strip()
+    
+    # 2. Remove preâmbulos antes do cabeçalho YAML
+    yaml_start = clean.find("---")
+    if yaml_start != -1 and yaml_start > 0:
+        before_yaml = clean[:yaml_start].strip()
+        if before_yaml:
+            print(f"✂️ Sanitizador Python: Removendo preâmbulo antes do YAML: {before_yaml[:100]}...")
+            clean = clean[yaml_start:].strip()
+            
+    # 3. Remove blockquotes (>) do início de cada linha
+    lines = clean.splitlines()
+    clean_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(">"):
+            line = re.sub(r'^(\s*>)+', '', line).strip()
+        clean_lines.append(line)
+        
+    return "\n".join(clean_lines)
 
 
 def load_prompt() -> str:
@@ -111,7 +143,7 @@ def rewrite_content_to_style(raw_content: str, model: str = "gemini-2.5-flash") 
         model=model,
         contents=full_prompt,
     )
-    return response.text
+    return sanitize_markdown(response.text)
 
 
 def review_and_polish_markdown(draft_markdown: str, model: str = "gemini-2.5-flash") -> str:
@@ -147,4 +179,4 @@ def review_and_polish_markdown(draft_markdown: str, model: str = "gemini-2.5-fla
         model=model,
         contents=review_prompt,
     )
-    return response.text
+    return sanitize_markdown(response.text)
