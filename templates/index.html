@@ -367,9 +367,10 @@ function renderMain() {
 }
 
 // ══ ARQUIVOS ══
-async function loadFiles(silent=false) {
+async function loadFiles(force=false) {
   if (!proj) return;
-  const r = await fetch(`/api/files/${encodeURIComponent(proj)}`);
+  const url = `/api/files/${encodeURIComponent(proj)}` + (force ? "?force=true" : "");
+  const r = await fetch(url);
   const d = await r.json();
 
   const mdSig = JSON.stringify(d.mds);
@@ -595,7 +596,7 @@ async function generatePDF() {
   if (d.ok && d.result?.length) {
     log.innerHTML += `\n<span class="ok">✅ ${d.result[0]} gerado!</span>`;
     toast("✅ PDF gerado!","success");
-    _pdfSig=""; loadFiles(); loadProjects();
+    _pdfSig=""; loadFiles(true); loadProjects();
   } else {
     log.innerHTML += `\n<span class="err">❌ ${d.error||'Erro ao gerar'}</span>`;
     toast("❌ Falha ao gerar","error");

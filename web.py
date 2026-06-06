@@ -459,8 +459,9 @@ def api_delete_project(project):
 # ════════════════════════════════════════
 @app.route("/api/files/<project>")
 def api_files(project):
+    force = request.args.get("force", "").lower() == "true"
     # Sincroniza do Firebase antes de carregar arquivos
-    _sync_project_from_firebase(project)
+    _sync_project_from_firebase(project, force=force)
     pd = _pdir(project)
     ad = _adir(project)
     mds  = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(pd, "*.md")))]
