@@ -409,9 +409,12 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             story.append(Paragraph("• " + _format_inline(line[2:]), LIST))
             continue
 
-        # Imagens [IMG:nome.ext] ou [IMG:img1.ext|img2.ext]
-        if line.startswith("[IMG:") and line.endswith("]"):
-            names = line[5:-1].strip().split("|")
+        # Imagens [IMG:nome.ext] ou [IMG:img1.ext|img2.ext] (suporta descrição opcional depois)
+        if line.startswith("[IMG:"):
+            bracket_end = line.find("]")
+            if bracket_end == -1:
+                continue
+            names = line[5:bracket_end].strip().split("|")
             md_dir = os.path.dirname(md_path)
             
             loaded_imgs = []
