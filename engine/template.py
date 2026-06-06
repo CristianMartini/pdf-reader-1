@@ -419,6 +419,11 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
     # ── Remover front-matter YAML (--- ... ---) antes de parsear linha a linha ──
     content = re.sub(r'^\s*---\s*\n.*?\n---\s*\n', '', raw_content, count=1, flags=re.DOTALL | re.MULTILINE)
 
+    # Remover sugestões de imagens instrucionais multilinhas (ex: [INSIRA UMA IMAGEM AQUI: ...])
+    # Mantém a nossa tag de imagem válida [IMG:...]
+    pattern = r'\[\s*(?:INSIRA|INSERIR|IMAGEM|SUGEST[AÃ]O|IMAGE|PHOTO|FIGURA|ILUSTRA[CÇ][AÃ]O|DIAGRAMA)\b[^\]]*\]'
+    content = re.sub(pattern, '', content, flags=re.IGNORECASE)
+
     lines = content.splitlines()
 
     for raw in lines:
@@ -522,21 +527,6 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
                         story.append(KeepTogether(elements))
                     except Exception as e:
                         print(f"Erro ao processar imagem real: {e}")
-                        img_path = None
-                        
-                if not img_path:
-                    # Imagem não encontrada - Criar placeholder visual
-                    p_text = (
-                        f"<font color='#011641'><b>🖼️ [Imagem Didática Sugerida: {name_item}]</b></font><br/>"
-                        f"<font color='#4A5568'><i>Instrução para inserção: {desc or 'Nenhuma descrição fornecida pela IA.'}</i></font>"
-                    )
-                    p = Paragraph(p_text, IMG_PLACEHOLDER_STYLE)
-                    story.append(KeepTogether([
-                        Spacer(1, 8),
-                        p,
-                        Spacer(1, 8)
-                    ]))
-            
             else:
                 # Imagem dupla ou múltipla
                 col_elements = []
@@ -554,33 +544,38 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
                             img.hAlign = "CENTER"
                             col_elements.append(img)
                         except Exception:
-                            img_path = None
-                            
-                    if not img_path:
-                        # Cria placeholder de coluna
-                        p_text = (
-                            f"<font color='#011641'><b>🖼️ [Sugestão: {name_item}]</b></font><br/>"
-                            f"<font size='8' color='#718096'><i>Upload pendente</i></font>"
-                        )
-                        p = Paragraph(p_text, IMG_COL_PLACEHOLDER_STYLE)
-                        col_elements.append(p)
+                            pass
                 
-                while len(col_elements) < 2:
-                    col_elements.append("")
+                if not col_elements:
+                    continue
                     
-                t = Table([[col_elements[0], "", col_elements[1]]], colWidths=[col_w, gap, col_w])
-                t.setStyle(TableStyle([
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ]))
-                
-                elements = [Spacer(1, 10), t]
-                if desc:
-                    elements.append(Spacer(1, 4))
-                    elements.append(Paragraph(f"<b>Figura:</b> {desc}", CAPTION))
-                elements.append(Spacer(1, 10))
-                
-                story.append(KeepTogether(elements))
+                if len(col_elements) == 1:
+                    # Apenas uma encontrada - renderiza como única
+                    img = col_elements[0]
+                    img._restrictSize(11 * cm, 10 * cm)
+                    img.hAlign = "CENTER"
+                    
+                    elements = [Spacer(1, 10), img]
+                    if desc:
+                        elements.append(Spacer(1, 4))
+                        elements.append(Paragraph(f"<b>Figura:</b> {desc}", CAPTION))
+                    elements.append(Spacer(1, 10))
+                    story.append(KeepTogether(elements))
+                else:
+                    # Ambas encontradas - renderiza lado a lado
+                    t = Table([[col_elements[0], "", col_elements[1]]], colWidths=[col_w, gap, col_w])
+                    t.setStyle(TableStyle([
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ]))
+                    
+                    elements = [Spacer(1, 10), t]
+                    if desc:
+                        elements.append(Spacer(1, 4))
+                        elements.append(Paragraph(f"<b>Figura:</b> {desc}", CAPTION))
+                    elements.append(Spacer(1, 10))
+                    
+                    story.append(KeepTogether(elements))
             continue
 
         # Parágrafo de texto
@@ -658,7 +653,7 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
         onFirstPage=lambda c, d: header_footer(c, d, assets_dir),
         onLaterPages=lambda c, d: header_footer(c, d, assets_dir),
     )
-    print(f"  ✅ {os.path.basename(output_path)}")
+    print(f"  [OK] {os.path.basename(output_path)}")
     return output_path
 
 
