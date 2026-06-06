@@ -910,8 +910,9 @@ def api_config_gemini():
         "3. UNIR FRASES TRUNCADAS: Una frases no corpo dos parágrafos normais que parecem cortadas ou palavras grudadas de forma inadequada devido a quebras de páginas (ex: se encontrar algo como 'aborto.usta e ética da lei', corrija para 'aborto. A busca justa e ética da lei').\n"
         "4. SANITIZAÇÃO DE MARCAÇÕES: Remova crases ou caracteres de código das marcações especiais do nosso parser de PDF. "
         "Exemplo: se encontrar `[BOX]` ou `[/BOX]` com crases/backticks, remova as crases e garanta que fiquem puras em linhas isoladas: [BOX] e [/BOX]. "
-        "Faça o mesmo para as tags de imagem: `[IMG:nome.jpg]` deve se tornar apenas [IMG:nome.jpg] sem crases.\n"
-        "5. REMOVER LEGENDAS DE IMAGEM AUTOMÁTICAS: Remova qualquer legenda de imagem, descrição ou nota textual em itálico/negrito (como *Ilustração de...* ou *Legenda...*) gerada automaticamente logo abaixo ou acima das tags [IMG:...]. As tags de imagem devem aparecer totalmente isoladas em suas próprias linhas sem qualquer texto explicativo associado.\n"
+        "Faça o mesmo para as tags de imagem: `[IMG:nome.jpg]` deve se tornar apenas [IMG:nome.jpg] sem crases. "
+        "Se houver uma descrição em parênteses na mesma linha da tag de imagem, mantenha-a (ex: [IMG:cadaver.png] (descrição)).\n"
+        "5. LEGENDAS DE IMAGEM: A descrição/sugestão do tipo de imagem deve constar exclusivamente entre parênteses e na mesma linha da tag (ex: `[IMG:esquema.png] (Diagrama comparativo X e Y)`). Remova qualquer legenda de imagem, descrição ou nota explicativa em itálico/negrito gerada automaticamente nas linhas abaixo ou acima das tags de imagem.\n"
         "6. NÃO ALUCINE: Mantenha todo o conteúdo didático, técnico, exercícios e formatação de cabeçalho YAML intactos. Apenas lapide a escrita e corrija as falhas de formatação/junção.\n"
         "7. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
     )

@@ -33,13 +33,14 @@ Sintaxe isolada:
 
 ### 5. INSERÇÃO ESTRATÉGICA DE IMAGENS (SINTAXE EXCLUSIVA)
 - **PROIBIDO** o uso da sintaxe markdown padrão `![alt](url)`.
-- Use EXCLUSIVAMENTE a sintaxe `[IMG:nome_do_arquivo.extensao]` em linhas isoladas.
-- **PROIBIÇÃO DE LEGENDAS AUTOMÁTICAS**: NUNCA escreva ou gere qualquer texto de legenda, descrição ou nota explicativa (por exemplo, textos em itálico como `*Ilustração de...*` ou `*Legenda...*`) abaixo ou acima da tag `[IMG:...]`. Deixe apenas a tag de imagem isolada em sua própria linha. O usuário irá inserir as legendas manualmente se desejar.
-- Insira tags sugestivas onde um infográfico, diagrama ou esquema visual aumentaria significativamente a compreensão (ex: `[IMG:fluxo_processo.jpg]`).
-- Exemplo de imagem única (em linha isolada, sem qualquer texto embaixo):
-  [IMG:esquema_visual.jpg]
-- Exemplo de imagem dupla (lado a lado, em linha isolada, sem qualquer texto embaixo):
-  [IMG:antes.jpg|depois.jpg]
+- Use EXCLUSIVAMENTE a sintaxe `[IMG:nome_especifico.ext] (Descrição detalhada em parênteses do que a imagem deve retratar ou diagrama sugerido)` em uma linha isolada.
+- **DICA DE NOMEAÇÃO**: O nome do arquivo deve ser específico e descritivo em letras minúsculas (ex: `[IMG:esquema_cadeia_custodia.png]`).
+- **DESCRIÇÃO EM PARÊNTESES**: Logo após o colchete de fechamento `]`, insira na mesma linha uma descrição rica entre parênteses para sugerir o tipo de imagem (ex: `[IMG:lesao_defesa.png] (Fotografia médica de lesão de defesa típica no antebraço ou diagrama anatômico indicativo)`).
+- **PROIBIÇÃO DE TEXTOS SECUNDÁRIOS**: NUNCA escreva ou gere qualquer texto de legenda, descrição ou nota explicativa (por exemplo, textos em itálico como `*Ilustração de...*` ou `*Legenda...*`) nas linhas abaixo ou acima da tag `[IMG:...]`. Deixe apenas a tag com a sugestão em parênteses na sua própria linha isolada.
+- Exemplo de imagem única (em linha isolada):
+  [IMG:esquema_custodia.png] (Diagrama de fluxo ilustrando as etapas da cadeia de custódia desde a coleta até o descarte)
+- Exemplo de imagem dupla (lado a lado, em linha isolada):
+  [IMG:escaras_reacao.png|escaras_pos_morte.png] (Comparativo visual entre escaras com reação vital e escaras produzidas pós-morte)
 
 ### 6. ESTRUTURA DE SEPARADORES
 Use três traços isolados `---` para delimitar seções principais e criar uma transição suave.

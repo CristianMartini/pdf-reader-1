@@ -1033,9 +1033,10 @@ async function processQueueItem(item) {
       "INSTRUÇÃO ADICIONAL: Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado acima. " +
       "Preserve o conteúdo didático e técnico, mas estruture com cabeçalho YAML apropriado (titulo, aula e materia), " +
       "títulos (#, ##, ###, ####), parágrafos separados por uma linha em branco, listas com traços, e adicione pelo menos " +
-      "um bloco [BOX] para fixação de conteúdo importante. Insira tags [IMG:nome_imagem.jpg] caso faça sentido pedagógico " +
-      "no texto, para que o usuário possa inserir imagens depois. ATENÇÃO: NUNCA gere qualquer legenda em itálico ou texto " +
-      "descritivo embaixo das tags [IMG:...]. Deixe a tag de imagem isolada em sua própria linha. " +
+      "um bloco [BOX] para fixação de conteúdo importante. Insira tags de imagem sugestivas baseadas no contexto. " +
+      "As tags de imagem devem usar obrigatoriamente a sintaxe `[IMG:nome_especifico.png] (Descrição detalhada em parênteses na mesma linha sugerindo a imagem/diagrama)` " +
+      "em sua própria linha isolada (ex: `[IMG:lesao_defesa.png] (Fotografia de lesão típica no antebraço ou diagrama anatômico)`). " +
+      "NUNCA gere qualquer legenda em itálico ou texto descritivo nas linhas abaixo ou acima das tags [IMG:...]. " +
       "Importante: Sua resposta deve começar diretamente com '---' sem qualquer mensagem introdutória ou saudação.\n\n" +
       `CONTEÚDO BRUTO A SER REESCRITO:\n${dataExtract.text}`;
       
