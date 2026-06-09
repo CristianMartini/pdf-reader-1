@@ -11,26 +11,50 @@ import random
 import traceback
 from google import genai
 
-# Configuração via variável de ambiente (nunca hardcode a key)
-API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+# Configuração via variáveis de ambiente e arquivo .env (múltiplas chaves suportadas)
+API_KEYS = []
 
-# Se não estiver no ambiente, tenta ler de um arquivo .env local (seguro e ignorado no Git)
-if not API_KEY:
-    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
-    if os.path.exists(env_path):
-        try:
-            with open(env_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip().startswith("GEMINI_API_KEY="):
-                        API_KEY = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        break
-        except Exception as e:
-            print(f"⚠️ Erro ao ler arquivo .env: {e}")
+def _add_key(k: str):
+    if k and k.strip() and k not in API_KEYS:
+        clean_k = k.strip()
+        # Ignora placeholders genéricos
+        if clean_k != "INSIRA_SEGUNDA_CHAVE_AQUI" and clean_k != "sua_chave_aqui":
+            API_KEYS.append(clean_k)
 
-if not API_KEY:
+# 1. Tenta carregar do ambiente
+_add_key(os.environ.get("GEMINI_API_KEY", ""))
+_add_key(os.environ.get("GEMINI_API_KEY_1", ""))
+_add_key(os.environ.get("GEMINI_API_KEY_2", ""))
+for i in range(3, 10):
+    _add_key(os.environ.get(f"GEMINI_API_KEY_{i}", ""))
+
+# 2. Tenta ler do .env local
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+if os.path.exists(env_path):
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if not line_str or line_str.startswith("#"):
+                    continue
+                if "=" in line_str:
+                    name, val = line_str.split("=", 1)
+                    name = name.strip()
+                    val = val.strip().strip('"').strip("'")
+                    if name in ["GEMINI_API_KEY", "GEMINI_API_KEY_1", "GEMINI_API_KEY_2"] or name.startswith("GEMINI_API_KEY_"):
+                        _add_key(val)
+    except Exception as e:
+        print(f"⚠️ Erro ao ler arquivo .env: {e}")
+
+if not API_KEYS:
     raise ValueError("A chave GEMINI_API_KEY não foi encontrada! Crie um arquivo chamado '.env' na raiz do projeto e insira: GEMINI_API_KEY=sua_chave_aqui")
 
+# Define variáveis para compatibilidade de importação
+API_KEY = API_KEYS[0]
 client = genai.Client(api_key=API_KEY)
+
+# Lista de todos os clientes Gemini disponíveis para rotação
+clients = [genai.Client(api_key=k) for k in API_KEYS]
 
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompt.md")
 
@@ -73,13 +97,19 @@ def load_prompt() -> str:
 
 def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2):
     """
-    Executa client.models.generate_content com lógica de retentativa exponencial.
-    Cobre erros 503 (UNAVAILABLE), 429 (RESOURCE_EXHAUSTED/Rate Limit) e erros de rede temporários.
+    Executa client.models.generate_content com lógica de retentativa exponencial
+    e rotação de chaves/clientes de API para lidar com alta demanda e limites de taxa.
     """
     backoff = initial_backoff
+    
+    current_idx = 0
+    if client in clients:
+        current_idx = clients.index(client)
+        
     for attempt in range(max_retries):
+        active_client = clients[current_idx % len(clients)]
         try:
-            response = client.models.generate_content(
+            response = active_client.models.generate_content(
                 model=model,
                 contents=contents,
             )
@@ -96,6 +126,11 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
             if attempt == max_retries - 1 or not is_temporary:
                 print(f"❌ Gemini: Falha definitiva no generate_content na tentativa {attempt + 1}: {e}")
                 raise e
+            
+            # Se houver múltiplas chaves configuradas, rotaciona para a próxima
+            if len(clients) > 1:
+                current_idx += 1
+                print(f"🔄 Gemini: Rotacionando para a chave API {current_idx % len(clients) + 1} devido a erro temporário: {err_msg}")
             
             # Aplica backoff exponencial com jitter
             sleep_time = backoff + random.uniform(0, 1)

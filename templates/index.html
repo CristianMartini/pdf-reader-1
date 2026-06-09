@@ -932,16 +932,22 @@ async function loadGeminiConfig() {
   return null;
 }
 
+let currentKeyIdx = 0;
+
 async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   const config = await loadGeminiConfig();
-  if (!config || !config.key) {
+  if (!config || (!config.key && (!config.keys || config.keys.length === 0))) {
     throw new Error("Chave do Gemini API não encontrada no backend");
   }
   
+  // Lista de chaves disponíveis (se keys estiver vazio ou indisponível, usa config.key)
+  const keys = config.keys && config.keys.length > 0 ? config.keys : [config.key];
+  
   let backoff = initialBackoff;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const activeKey = keys[currentKeyIdx % keys.length];
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.key}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -970,6 +976,12 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
       
       if (attempt === maxRetries - 1 || !isTemporary) {
         throw new Error(err.message || "Erro na API do Gemini");
+      }
+      
+      // Rotaciona a chave em caso de erro temporário
+      if (keys.length > 1) {
+        currentKeyIdx = (currentKeyIdx + 1) % keys.length;
+        console.warn(`🔄 Gemini Direct: Rotacionando para a chave API ${currentKeyIdx + 1} devido a erro.`);
       }
       
       const sleepTime = backoff + Math.random() * 1000;
