@@ -887,7 +887,7 @@ def api_queue_extract(project):
 
 @app.route("/api/config/gemini", methods=["GET"])
 def api_config_gemini():
-    from ai.gemini_client import load_prompt, API_KEY
+    from ai.gemini_client import load_prompt, API_KEY, API_KEYS
     try:
         base_prompt = load_prompt()
     except Exception:
@@ -925,6 +925,7 @@ def api_config_gemini():
     return jsonify(
         ok=True,
         key=key,
+        keys=API_KEYS,
         base_prompt=base_prompt,
         review_instructions=review_instructions
     )
