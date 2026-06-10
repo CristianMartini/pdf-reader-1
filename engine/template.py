@@ -197,9 +197,9 @@ def _preprocess_image(img_path: str,
 H1  = ParagraphStyle("H1",  fontName=FONT_BOLD, fontSize=16,
                      textColor=NAVY, spaceBefore=18, spaceAfter=8, leading=22)
 MATERIA_STYLE = ParagraphStyle("MATERIA_STYLE", fontName=FONT_BOLD, fontSize=18,
-                     textColor=NAVY, alignment=1)
+                     textColor=NAVY, leading=24, alignment=1)
 TITLE_AULA = ParagraphStyle("TITLE_AULA", fontName=FONT_BOLD, fontSize=18,
-                     textColor=NAVY, alignment=1)
+                     textColor=NAVY, leading=24, alignment=1)
 H2  = ParagraphStyle("H2",  fontName=FONT_BOLD, fontSize=14,
                      textColor=NAVY, spaceBefore=14, spaceAfter=6, leading=19)
 H3  = ParagraphStyle("H3",  fontName=FONT_BOLD, fontSize=12,
@@ -217,7 +217,7 @@ BOX  = ParagraphStyle("BOX",  fontName=FONT_REG, fontSize=11,
                       borderPadding=10, leading=16,
                       textColor=NAVY, spaceAfter=10, spaceBefore=8)
 CAPTION = ParagraphStyle("CAPTION", fontName=FONT_REG, fontSize=9,
-                          textColor=GRAY, alignment=1, spaceAfter=6)
+                           textColor=GRAY, leading=12, alignment=1, spaceAfter=6)
 IMG_PLACEHOLDER_STYLE = ParagraphStyle(
     "IMG_PLACEHOLDER_STYLE",
     fontName=FONT_REG,
@@ -310,29 +310,30 @@ def draw_cover(canvas, doc, meta: dict, assets: str):
     canvas.setFont(FONT_BOLD, 14)
     canvas.drawString(2 * cm, H - 534, f"Aula {meta.get('aula', '01')}")
 
-    # 8. Título
-    title  = meta.get("title", "Sem título")
-    words  = title.split()
-    lines, cur = [], ""
-    for w in words:
-        test = (cur + " " + w).strip()
-        if len(test) <= 13:
-            cur = test
-        else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+    # 8. Título - Renderizado dinamicamente com Paragraph para evitar sobreposição ou quebra da página
+    title = meta.get("title", "Sem título")
+    if len(title) <= 30:
+        font_sz = 44
+        leading = 50
+    elif len(title) <= 60:
+        font_sz = 32
+        leading = 38
+    else:
+        font_sz = 24
+        leading = 28
 
-    font_sz = 60 if len(lines) <= 3 else 44
-    leading  = 74 if len(lines) <= 3 else 54
-
-    canvas.setFillColor(colors.white)
-    canvas.setFont(FONT_BOLD, font_sz)
-    title_y = H - 534 - 18 - font_sz
-    for i, ln in enumerate(lines):
-        canvas.drawString(2 * cm, title_y - i * leading, ln)
+    cover_title_style = ParagraphStyle(
+        "CoverTitle",
+        fontName=FONT_BOLD,
+        fontSize=font_sz,
+        leading=leading,
+        textColor=colors.white
+    )
+    p = Paragraph(title, cover_title_style)
+    # Limita a largura em 12.5 cm para não colidir com o paralelograma dourado da capa
+    w_p, h_p = p.wrap(12.5 * cm, H)
+    title_y = H - 534 - 18 - h_p
+    p.drawOn(canvas, 2 * cm, title_y)
 
     canvas.restoreState()
 
