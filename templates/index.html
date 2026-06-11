@@ -288,7 +288,8 @@ function renderMain() {
             <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 2</span>
             <span>📄 Selecionar Documento</span>
           </div>
-          <div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn btn-gold btn-sm" onclick="downloadAllMds()" title="Baixar todos os arquivos Markdown do projeto em um ZIP (para Chatbots)">📦 Baixar ZIP</button>
             <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdUp').click()">＋ Upload .md</button>
             <input type="file" id="mdUp" accept=".md" style="display:none" onchange="uploadFile(this,'md')">
           </div>
@@ -418,6 +419,14 @@ async function loadFiles(force=false) {
     const el = document.getElementById("pdfCount");
     if (el) el.textContent = c ? `${c} arquivo${c>1?'s':''}` : "";
   }
+}
+
+function downloadAllMds() {
+  if (!proj) {
+    toast("Selecione um projeto primeiro", "error");
+    return;
+  }
+  window.location.href = `/api/projects/${encodeURIComponent(proj)}/download-mds`;
 }
 
 async function loadFile(filename) {

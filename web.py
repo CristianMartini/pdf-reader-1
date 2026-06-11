@@ -1056,22 +1056,18 @@ def api_queue_process(project):
         return jsonify(ok=False, error="Arquivo temporário não encontrado no servidor")
         
     try:
-        # 1. Extração de texto
+        # 1. Envio para a IA Gemini (Geração + Revisão unificada e upload nativo)
+        from ai.gemini_client import process_content_to_style
+        
         ext = os.path.splitext(safe_name)[1].lower()
         if ext == ".pdf":
-            raw_text = _extract_text_from_pdf(filepath)
-            if not raw_text.strip():
-                return jsonify(ok=False, error="O PDF parece estar vazio ou é uma imagem escaneada sem texto.")
+            rewritten_markdown = process_content_to_style(filepath, is_pdf=True)
         elif ext in (".md", ".txt"):
             with open(filepath, "r", encoding="utf-8") as f:
                 raw_text = f.read()
+            rewritten_markdown = process_content_to_style(raw_text, is_pdf=False)
         else:
             return jsonify(ok=False, error=f"Extensão de arquivo não suportada: {ext}")
-            
-        # 2. Envio para a IA Gemini (Geração + Revisão)
-        from ai.gemini_client import rewrite_content_to_style, review_and_polish_markdown
-        draft_markdown = rewrite_content_to_style(raw_text)
-        rewritten_markdown = review_and_polish_markdown(draft_markdown)
         
         # 3. Salvar como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"
@@ -1114,6 +1110,37 @@ def api_queue_process(project):
             except Exception:
                 pass
         return jsonify(ok=False, error=str(e))
+
+
+@app.route("/api/projects/<project>/download-mds")
+def api_download_project_mds(project):
+    import io
+    import zipfile
+    from flask import send_file
+
+    safe_proj = secure_filename(project)
+    _sync_project_from_firebase(safe_proj)
+    
+    pd = _pdir(safe_proj)
+    md_files = glob.glob(os.path.join(pd, "*.md"))
+    
+    if not md_files:
+        return jsonify(ok=False, error="Nenhum arquivo Markdown encontrado neste projeto")
+        
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for filepath in md_files:
+            basename = os.path.basename(filepath)
+            zipf.write(filepath, basename)
+            
+    memory_file.seek(0)
+    
+    return send_file(
+        memory_file,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{safe_proj}_markdowns.zip"
+    )
 
 
 # ════════════════════════════════════════

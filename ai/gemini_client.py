@@ -10,6 +10,7 @@ import time
 import random
 import traceback
 from google import genai
+from google.genai import types
 
 # Configuração via variáveis de ambiente e arquivo .env (múltiplas chaves suportadas)
 API_KEYS = []
@@ -59,6 +60,44 @@ clients = [genai.Client(api_key=k) for k in API_KEYS]
 PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompt.md")
 
 
+def replace_special_symbols(text: str) -> str:
+    sub_map = {
+        '₀': '<sub>0</sub>', '₁': '<sub>1</sub>', '₂': '<sub>2</sub>', '₃': '<sub>3</sub>',
+        '₄': '<sub>4</sub>', '₅': '<sub>5</sub>', '₆': '<sub>6</sub>', '₇': '<sub>7</sub>',
+        '₈': '<sub>8</sub>', '₉': '<sub>9</sub>'
+    }
+    sup_map = {
+        '⁰': '<sup>0</sup>', '¹': '<sup>1</sup>', '²': '<sup>2</sup>', '³': '<sup>3</sup>',
+        '⁴': '<sup>4</sup>', '⁵': '<sup>5</sup>', '⁶': '<sup>6</sup>', '⁷': '<sup>7</sup>',
+        '⁸': '<sup>8</sup>', '⁹': '<sup>9</sup>', '°': '<sup>o</sup>', 'º': '<sup>o</sup>',
+        'ª': '<sup>a</sup>'
+    }
+    for char, replacement in sub_map.items():
+        text = text.replace(char, replacement)
+    for char, replacement in sup_map.items():
+        text = text.replace(char, replacement)
+    return text
+
+
+def format_paragraphs_for_canva(text: str) -> str:
+    if not text:
+        return ""
+    blocks = re.split(r'\n\s*\n', text)
+    processed_blocks = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.splitlines()
+        if (block.startswith("---") or 
+            any(line.strip().startswith(("#", "-", "*", "[BOX]", "[/BOX]", "[IMG:")) for line in lines)):
+            processed_blocks.append(block)
+        else:
+            joined = " ".join(line.strip() for line in lines if line.strip())
+            processed_blocks.append(joined)
+    return "\n\n".join(processed_blocks)
+
+
 def sanitize_markdown(text: str) -> str:
     if not text:
         return ""
@@ -86,8 +125,16 @@ def sanitize_markdown(text: str) -> str:
         if stripped.startswith(">"):
             line = re.sub(r'^(\s*>)+', '', line).strip()
         clean_lines.append(line)
+    clean = "\n".join(clean_lines)
+    
+    # 4. Substituição de glifos especiais (graus e subscritos químicos)
+    clean = replace_special_symbols(clean)
+    
+    # 5. Formatação de parágrafos contínuos para compatibilidade com Canva
+    clean = format_paragraphs_for_canva(clean)
         
-    return "\n".join(clean_lines)
+    return clean
+
 
 
 def load_prompt() -> str:
@@ -95,7 +142,7 @@ def load_prompt() -> str:
         return f.read()
 
 
-def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2):
+def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2, config=None):
     """
     Executa client.models.generate_content com lógica de retentativa exponencial
     e rotação de chaves/clientes de API para lidar com alta demanda e limites de taxa.
@@ -112,6 +159,7 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
             response = active_client.models.generate_content(
                 model=model,
                 contents=contents,
+                config=config
             )
             return response
         except Exception as e:
@@ -137,6 +185,7 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
             print(f"⚠️ Gemini: Erro temporário ({err_msg}). Tentativa {attempt + 1}/{max_retries} falhou. Retentando em {sleep_time:.2f}s...")
             time.sleep(sleep_time)
             backoff *= 2 # Dobra o intervalo
+
 
 
 def generate_md(topic: str, model: str = "gemini-2.5-flash") -> str:
@@ -215,3 +264,88 @@ def review_and_polish_markdown(draft_markdown: str, model: str = "gemini-2.5-fla
         contents=review_prompt,
     )
     return sanitize_markdown(response.text)
+
+
+def process_content_to_style(content_input: str, is_pdf: bool = False, model: str = None) -> str:
+    """
+    Processa o conteúdo (bruto ou PDF) em um único passo otimizado,
+    reescrevendo e polindo no padrão Evolux.
+    """
+    if model is None:
+        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+
+    base_prompt = load_prompt()
+    
+    # Adicionamos diretrizes de revisão e sanitização no prompt do sistema
+    system_instruction = (
+        f"{base_prompt}\n\n"
+        "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
+        "Sua missão é gerar o conteúdo em Markdown impecável, formatado e revisado de primeira, seguindo regras rígidas de saída:\n\n"
+        "REGRA ABSOLUTA DE SAÍDA:\n"
+        "- Sua resposta deve conter EXCLUSIVAMENTE o texto Markdown revisado, começando diretamente com o bloco YAML (---) do cabeçalho.\n"
+        "- NUNCA inclua preâmbulos, explicações, comentários sobre a revisão, ou qualquer texto introdutório antes do conteúdo.\n"
+        "- A primeira linha da sua resposta DEVE ser exatamente '---' (o início do cabeçalho YAML).\n"
+        "- Se o rascunho contiver blocos de código Markdown (```markdown ... ```), remova esses delimitadores e retorne apenas o conteúdo interno.\n\n"
+        "DIRETRIZES DE REVISÃO E FORMATAÇÃO:\n"
+        "1. CORREÇÃO GRAMATICAL: Corrija quaisquer erros ortográficos, concordância e digitação.\n"
+        "2. NÃO UNIR CABEÇALHOS AO TEXTO: Os cabeçalhos (#, ##, ###, ####) devem sempre ficar em suas próprias linhas, isolados por uma linha em branco.\n"
+        "3. QUEBRAS DE LINHA PARA O CANVA: Parágrafos normais devem ser contínuos (linhas unidas com espaços simples). NUNCA use quebras de linha simples no meio de um parágrafo. Separe parágrafos estritamente com exatamente duas quebras de linha (\\n\\n).\n"
+        "4. EVITAR SIMBOLOS TOFU (QUADRADOS): NUNCA utilize caracteres Unicode de subscrito/sobrescrito especiais (como ₂ ou ³) ou símbolo de graus (°) direto se puderem quebrar em fontes padrão. Em vez disso, use tags HTML que o ReportLab suporta nativamente:\n"
+        "   - Use <sub> e </sub> para subscritos. Exemplo: H<sub>2</sub>O, CO<sub>2</sub>.\n"
+        "   - Use <sup> e </sup> para sobrescritos e graus Celsius. Exemplo: 35<sup>o</sup>C ou 10<sup>a</sup> aula.\n"
+        "5. SANITIZAÇÃO DE MARCAÇÕES: Garanta que marcações [BOX] e [/BOX] fiquem puras em linhas isoladas. Tags de imagens devem usar [IMG:nome_imagem.png] (Descrição detalhada).\n"
+        "6. PROIBIÇÃO DE BLOCKQUOTES (>): Nunca use o caractere '>' no início de linhas. Se necessário, coloque o texto dentro de um bloco [BOX].\n"
+        "7. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
+    )
+    
+    config = types.GenerateContentConfig(
+        system_instruction=system_instruction,
+        temperature=0.2
+    )
+
+    uploaded_file = None
+    try:
+        if is_pdf:
+            print(f"📤 Gemini API: Fazendo upload de PDF nativo: {content_input}")
+            # Faz o upload do PDF usando o cliente atual
+            uploaded_file = client.files.upload(file=content_input)
+            
+            # Aguarda o processamento do arquivo
+            state = uploaded_file.state
+            attempts = 0
+            while state == "PROCESSING" and attempts < 10:
+                print("⏳ Gemini API: Processando arquivo...")
+                time.sleep(2)
+                uploaded_file = client.files.get(name=uploaded_file.name)
+                state = uploaded_file.state
+                attempts += 1
+                
+            if state != "ACTIVE":
+                raise ValueError(f"O arquivo enviado para o Gemini está com estado inválido: {state}")
+                
+            contents = [
+                uploaded_file,
+                "\n\nInstrução: Por favor, leia o PDF fornecido acima e reescreva-o de acordo com as diretrizes do sistema."
+            ]
+        else:
+            contents = [
+                "INSTRUÇÃO ADICIONAL: Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado no sistema.\n\n"
+                f"CONTEÚDO BRUTO A SER REESCRITO:\n{content_input}"
+            ]
+
+        response = generate_content_with_retry(
+            client=client,
+            model=model,
+            contents=contents,
+            config=config
+        )
+        return sanitize_markdown(response.text)
+        
+    finally:
+        if uploaded_file:
+            try:
+                print(f"🗑️ Gemini API: Removendo arquivo temporário: {uploaded_file.name}")
+                client.files.delete(name=uploaded_file.name)
+            except Exception as e:
+                print(f"⚠️ Gemini API: Não foi possível deletar o arquivo temporário: {e}")
+
