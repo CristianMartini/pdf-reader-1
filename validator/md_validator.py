@@ -47,8 +47,9 @@ def validate(md: str) -> ValidationResult:
         result.errors.append(f"Conteúdo insuficiente ({word_count} palavras, mínimo: 2000)")
 
     # ── Padrões proibidos ──
-    if "<" in md and ">" in md:
-        result.errors.append("HTML detectado no markdown — proibido")
+    clean_for_html_check = re.sub(r'</?(?:sub|sup)>', '', md, flags=re.IGNORECASE)
+    if "<" in clean_for_html_check and ">" in clean_for_html_check:
+        result.errors.append("HTML detectado no markdown — proibido (apenas <sub> e <sup> são permitidos)")
 
     if re.search(r"https?://", md):
         result.errors.append("Links externos detectados — proibido")

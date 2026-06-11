@@ -142,10 +142,11 @@ def load_prompt() -> str:
         return f.read()
 
 
-def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2, config=None):
+def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2, config=None, pdf_path=None):
     """
     Executa client.models.generate_content com lógica de retentativa exponencial
     e rotação de chaves/clientes de API para lidar com alta demanda e limites de taxa.
+    Garante que o upload de arquivos PDF seja feito pelo mesmo cliente ativo na tentativa.
     """
     backoff = initial_backoff
     
@@ -155,10 +156,32 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
         
     for attempt in range(max_retries):
         active_client = clients[current_idx % len(clients)]
+        uploaded_file = None
         try:
+            actual_contents = contents
+            if pdf_path:
+                print(f"📤 Gemini API (Chave {current_idx % len(clients) + 1}): Fazendo upload do PDF nativo...")
+                uploaded_file = active_client.files.upload(file=pdf_path)
+                
+                # Aguarda o processamento do arquivo
+                state = uploaded_file.state
+                check_attempts = 0
+                while state == "PROCESSING" and check_attempts < 10:
+                    print("⏳ Gemini API: Processando arquivo...")
+                    time.sleep(2)
+                    uploaded_file = active_client.files.get(name=uploaded_file.name)
+                    state = uploaded_file.state
+                    check_attempts += 1
+                    
+                if state != "ACTIVE":
+                    raise ValueError(f"O arquivo enviado para o Gemini está com estado inválido: {state}")
+                
+                # Junta o arquivo temporário com as instruções do prompt
+                actual_contents = [uploaded_file, contents]
+
             response = active_client.models.generate_content(
                 model=model,
-                contents=contents,
+                contents=actual_contents,
                 config=config
             )
             return response
@@ -185,6 +208,14 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
             print(f"⚠️ Gemini: Erro temporário ({err_msg}). Tentativa {attempt + 1}/{max_retries} falhou. Retentando em {sleep_time:.2f}s...")
             time.sleep(sleep_time)
             backoff *= 2 # Dobra o intervalo
+        finally:
+            if uploaded_file:
+                try:
+                    print(f"🗑️ Gemini API: Removendo arquivo temporário: {uploaded_file.name}")
+                    active_client.files.delete(name=uploaded_file.name)
+                except Exception as ex:
+                    print(f"⚠️ Gemini API: Não foi possível deletar o arquivo temporário: {ex}")
+
 
 
 
@@ -303,49 +334,29 @@ def process_content_to_style(content_input: str, is_pdf: bool = False, model: st
         temperature=0.2
     )
 
-    uploaded_file = None
-    try:
-        if is_pdf:
-            print(f"📤 Gemini API: Fazendo upload de PDF nativo: {content_input}")
-            # Faz o upload do PDF usando o cliente atual
-            uploaded_file = client.files.upload(file=content_input)
-            
-            # Aguarda o processamento do arquivo
-            state = uploaded_file.state
-            attempts = 0
-            while state == "PROCESSING" and attempts < 10:
-                print("⏳ Gemini API: Processando arquivo...")
-                time.sleep(2)
-                uploaded_file = client.files.get(name=uploaded_file.name)
-                state = uploaded_file.state
-                attempts += 1
-                
-            if state != "ACTIVE":
-                raise ValueError(f"O arquivo enviado para o Gemini está com estado inválido: {state}")
-                
-            contents = [
-                uploaded_file,
-                "\n\nInstrução: Por favor, leia o PDF fornecido acima e reescreva-o de acordo com as diretrizes do sistema."
-            ]
-        else:
-            contents = [
-                "INSTRUÇÃO ADICIONAL: Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado no sistema.\n\n"
-                f"CONTEÚDO BRUTO A SER REESCRITO:\n{content_input}"
-            ]
-
+    if is_pdf:
+        # Se for PDF, passamos o caminho do arquivo no parâmetro pdf_path
+        # E contents passa a ser a instrução de leitura
+        contents = "\n\nInstrução: Por favor, leia o PDF fornecido acima e reescreva-o de acordo com as diretrizes do sistema."
+        response = generate_content_with_retry(
+            client=client,
+            model=model,
+            contents=contents,
+            config=config,
+            pdf_path=content_input
+        )
+    else:
+        contents = (
+            "INSTRUÇÃO ADICIONAL: Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado no sistema.\n\n"
+            f"CONTEÚDO BRUTO A SER REESCRITO:\n{content_input}"
+        )
         response = generate_content_with_retry(
             client=client,
             model=model,
             contents=contents,
             config=config
         )
-        return sanitize_markdown(response.text)
         
-    finally:
-        if uploaded_file:
-            try:
-                print(f"🗑️ Gemini API: Removendo arquivo temporário: {uploaded_file.name}")
-                client.files.delete(name=uploaded_file.name)
-            except Exception as e:
-                print(f"⚠️ Gemini API: Não foi possível deletar o arquivo temporário: {e}")
+    return sanitize_markdown(response.text)
+
 
