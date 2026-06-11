@@ -957,10 +957,12 @@ def api_config_gemini():
         "8. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
     )
     
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
     return jsonify(
         ok=True,
         key=key,
         keys=API_KEYS,
+        model=model,
         base_prompt=base_prompt,
         review_instructions=review_instructions
     )

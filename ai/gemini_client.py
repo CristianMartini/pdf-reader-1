@@ -226,11 +226,13 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
 
 
 
-def generate_md(topic: str, model: str = "gemini-2.5-flash") -> str:
+def generate_md(topic: str, model: str = None) -> str:
     """
     Gera conteúdo .md educacional para um tema.
     Retorna o texto markdown gerado pelo Gemini.
     """
+    if model is None:
+        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
     base_prompt = load_prompt()
     full_prompt = f"{base_prompt}\n\nTEMA: {topic}"
 
@@ -242,11 +244,13 @@ def generate_md(topic: str, model: str = "gemini-2.5-flash") -> str:
     return response.text
 
 
-def rewrite_content_to_style(raw_content: str, model: str = "gemini-2.5-flash") -> str:
+def rewrite_content_to_style(raw_content: str, model: str = None) -> str:
     """
     Reescreve um conteúdo bruto (.md ou texto extraído de PDF) adaptando-o
     às diretrizes pedagógicas e técnicas descritas em prompt.md.
     """
+    if model is None:
+        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
     base_prompt = load_prompt()
     full_prompt = (
         f"{base_prompt}\n\n"
@@ -268,12 +272,14 @@ def rewrite_content_to_style(raw_content: str, model: str = "gemini-2.5-flash") 
     return sanitize_markdown(response.text)
 
 
-def review_and_polish_markdown(draft_markdown: str, model: str = "gemini-2.5-flash") -> str:
+def review_and_polish_markdown(draft_markdown: str, model: str = None) -> str:
     """
     Atua como um Revisor Editorial Sênior da Evolux Academy.
     Analisa o rascunho em markdown, corrige erros gramaticais, une frases truncadas,
     garante a coesão pedagógica, sanitiza as tags de imagem e caixas [BOX] e retorna o markdown lapidado.
     """
+    if model is None:
+        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
     review_prompt = (
         "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
         "Sua missão é ler o rascunho de aula em Markdown abaixo e realizar uma revisão cirúrgica e rigorosa para deixá-lo impecável.\n\n"

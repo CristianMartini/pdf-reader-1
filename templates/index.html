@@ -956,7 +956,8 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const activeKey = keys[currentKeyIdx % keys.length];
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`;
+      const model = config.model || "gemini-2.5-pro";
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${activeKey}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
