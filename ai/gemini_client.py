@@ -18,8 +18,15 @@ API_KEYS = []
 def _add_key(k: str):
     if k and k.strip() and k not in API_KEYS:
         clean_k = k.strip()
-        # Ignora placeholders genéricos
-        if clean_k != "INSIRA_SEGUNDA_CHAVE_AQUI" and clean_k != "sua_chave_aqui":
+        # Ignora placeholders genéricos, chaves padrão ou não configuradas
+        is_placeholder = (
+            clean_k.startswith("INSIRA_") or
+            "chave_aqui" in clean_k.lower() or
+            "chave_api" in clean_k.lower() or
+            clean_k == "sua_chave_aqui" or
+            clean_k == "INSIRA_SEGUNDA_CHAVE_AQUI"
+        )
+        if not is_placeholder:
             API_KEYS.append(clean_k)
 
 # 1. Tenta carregar do ambiente
