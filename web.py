@@ -125,7 +125,13 @@ def init_firebase():
     # Try environment variable (either from .env locally or Vercel dashboard in production)
     if os.environ.get("FIREBASE_CREDENTIALS"):
         try:
-            cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
+            cred_str = os.environ.get("FIREBASE_CREDENTIALS").strip()
+            # Corrige quebras de linha escapadas comuns em variáveis do Vercel
+            if "\\n" in cred_str:
+                cred_str = cred_str.replace("\\n", "\n")
+            cred_json = json.loads(cred_str)
+            if "private_key" in cred_json and "\\n" in cred_json["private_key"]:
+                cred_json["private_key"] = cred_json["private_key"].replace("\\n", "\n")
             cred = credentials.Certificate(cred_json)
             project_id = cred_json.get("project_id")
             print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS env")
@@ -145,7 +151,9 @@ def init_firebase():
         print("⚠️ Firebase: Nenhuma credencial ou project_id encontrado. Rodando apenas em modo local.")
         return
 
-    bucket_name = f"{project_id}.firebasestorage.app"
+    bucket_name = os.environ.get("FIREBASE_STORAGE_BUCKET")
+    if not bucket_name:
+        bucket_name = f"{project_id}.firebasestorage.app"
     
     # 2. Initialize or retrieve the app
     try:
