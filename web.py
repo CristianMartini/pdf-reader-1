@@ -114,6 +114,32 @@ bucket = None
 _bucket_resolved = False
 LAST_SYNCED = {}
 
+def _parse_firebase_credentials() -> dict:
+    raw_cred = os.environ.get("FIREBASE_CREDENTIALS")
+    if not raw_cred:
+        return None
+    cred_str = raw_cred.strip()
+    # Remove aspas extras se presentes
+    if len(cred_str) >= 2 and (
+        (cred_str.startswith('"') and cred_str.endswith('"')) or
+        (cred_str.startswith("'") and cred_str.endswith("'"))
+    ):
+        cred_str = cred_str[1:-1].strip()
+        
+    try:
+        cred_json = json.loads(cred_str)
+    except Exception as e:
+        print(f"❌ Firebase: Falha ao decodificar JSON das credenciais: {e}")
+        raise e
+        
+    if isinstance(cred_json, dict) and "private_key" in cred_json:
+        pk = cred_json["private_key"]
+        if isinstance(pk, str) and "\\n" in pk:
+            cred_json["private_key"] = pk.replace("\\n", "\n")
+            
+    return cred_json
+
+
 def init_firebase():
     global firebase_app, bucket
     
@@ -125,16 +151,11 @@ def init_firebase():
     # Try environment variable (either from .env locally or Vercel dashboard in production)
     if os.environ.get("FIREBASE_CREDENTIALS"):
         try:
-            cred_str = os.environ.get("FIREBASE_CREDENTIALS").strip()
-            # Corrige quebras de linha escapadas comuns em variáveis do Vercel
-            if "\\n" in cred_str:
-                cred_str = cred_str.replace("\\n", "\n")
-            cred_json = json.loads(cred_str)
-            if "private_key" in cred_json and "\\n" in cred_json["private_key"]:
-                cred_json["private_key"] = cred_json["private_key"].replace("\\n", "\n")
-            cred = credentials.Certificate(cred_json)
-            project_id = cred_json.get("project_id")
-            print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS env")
+            cred_json = _parse_firebase_credentials()
+            if cred_json:
+                cred = credentials.Certificate(cred_json)
+                project_id = cred_json.get("project_id")
+                print("🔥 Firebase: Carregando chave de FIREBASE_CREDENTIALS env")
         except Exception as e:
             print(f"❌ Firebase: Erro ao ler FIREBASE_CREDENTIALS env: {e}")
     # Try local file
@@ -960,10 +981,11 @@ def api_debug_firebase():
     parsed_proj_id = None
     if info["env_firebase_credentials_present"]:
         try:
-            cred_json = json.loads(os.environ.get("FIREBASE_CREDENTIALS"))
-            parsed_proj_id = cred_json.get("project_id")
-            info["parsed_project_id"] = parsed_proj_id
-            info["parsed_keys"] = list(cred_json.keys())
+            cred_json = _parse_firebase_credentials()
+            if cred_json:
+                parsed_proj_id = cred_json.get("project_id")
+                info["parsed_project_id"] = parsed_proj_id
+                info["parsed_keys"] = list(cred_json.keys())
         except Exception as e:
             cred_error = f"JSON load error: {str(e)}"
             info["parse_error"] = cred_error
