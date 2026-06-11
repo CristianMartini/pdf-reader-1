@@ -951,13 +951,19 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   
   // Lista de chaves disponíveis (se keys estiver vazio ou indisponível, usa config.key)
   const keys = config.keys && config.keys.length > 0 ? config.keys : [config.key];
+  const keysCount = keys.length;
   
+  const baseModel = config.model || "gemini-2.5-pro";
+  let currentModel = baseModel;
+  
+  let keysTriedForCurrentModel = 0;
+  let sleepsCount = 0;
   let backoff = initialBackoff;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const activeKey = keys[currentKeyIdx % keys.length];
+  
+  while (true) {
+    const activeKey = keys[currentKeyIdx % keysCount];
     try {
-      const model = config.model || "gemini-2.5-pro";
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${activeKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${activeKey}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -981,23 +987,73 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
       return data.candidates[0].content.parts[0].text;
       
     } catch (err) {
-      const isTemporary = err.status === 503 || err.status === 504 || err.status === 429 || 
-                          (err.message && (err.message.includes("demand") || err.message.includes("temporary") || err.message.includes("quota")));
+      console.warn(`⚠️ Gemini Direct erro na chave ${currentKeyIdx % keysCount + 1} (${currentModel}):`, err);
       
-      if (attempt === maxRetries - 1 || !isTemporary) {
-        throw new Error(err.message || "Erro na API do Gemini");
+      const errMsg = err.message || "";
+      const isQuotaLimit = err.status === 429 || 
+                           errMsg.includes("quota") || 
+                           errMsg.includes("RESOURCE_EXHAUSTED") || 
+                           errMsg.includes("ResourceExhausted") ||
+                           errMsg.includes("rate limit");
+                           
+      const isTemporary = isQuotaLimit || err.status === 503 || err.status === 504 || 
+                          errMsg.includes("demand") || errMsg.includes("temporary") || errMsg.includes("overloaded");
+      
+      if (!isTemporary) {
+        // Erro permanente (como chave inválida ou erro de sintaxe)
+        // Se tivermos outras chaves, podemos tentar rotacionar a chave e continuar
+        if (keysCount > 1 && keysTriedForCurrentModel < keysCount - 1) {
+          console.warn("🔄 Rotacionando para próxima chave devido a erro permanente na chave atual...");
+          currentKeyIdx = (currentKeyIdx + 1) % keysCount;
+          keysTriedForCurrentModel++;
+          continue;
+        }
+        throw new Error(errMsg || "Erro permanente na API do Gemini");
       }
       
-      // Rotaciona a chave em caso de erro temporário
-      if (keys.length > 1) {
-        currentKeyIdx = (currentKeyIdx + 1) % keys.length;
-        console.warn(`🔄 Gemini Direct: Rotacionando para a chave API ${currentKeyIdx + 1} devido a erro.`);
+      if (isQuotaLimit) {
+        keysTriedForCurrentModel++;
+        if (keysTriedForCurrentModel >= keysCount) {
+          // Já tentou todas as chaves com esse modelo
+          if (currentModel === "gemini-2.5-pro") {
+            console.warn(`🔄 Cota do PRO excedida em todas as chaves (${keysCount}). Fazendo fallback para gemini-2.5-flash...`);
+            currentModel = "gemini-2.5-flash";
+            keysTriedForCurrentModel = 0;
+            // Tenta imediatamente com o Flash, sem dormir
+            continue;
+          } else {
+            // Já tentou todas as chaves com Flash também
+            if (sleepsCount >= maxRetries) {
+              throw new Error(errMsg || "Limite de retentativas excedido (cota esgotada em todas as chaves e modelos)");
+            }
+            const sleepTime = backoff + Math.random() * 1000;
+            console.warn(`⏳ Cota esgotada em tudo. Aguardando ${(sleepTime/1000).toFixed(2)}s antes de reiniciar ciclo...`);
+            await new Promise(r => setTimeout(r, sleepTime));
+            sleepsCount++;
+            backoff *= 2;
+            keysTriedForCurrentModel = 0;
+            currentModel = baseModel; // reinicia com o modelo pro
+          }
+        } else {
+          // Rotaciona chave e tenta imediatamente
+          currentKeyIdx = (currentKeyIdx + 1) % keysCount;
+          console.warn(`🔄 Cota excedida na chave. Rotacionando para a chave ${currentKeyIdx % keysCount + 1} com ${currentModel}...`);
+          continue;
+        }
+      } else {
+        // Outro erro temporário (ex: 503/504)
+        if (sleepsCount >= maxRetries) {
+          throw new Error(errMsg || "Erro temporário persistente do Gemini");
+        }
+        // Rotaciona chave e dorme antes de retentar
+        currentKeyIdx = (currentKeyIdx + 1) % keysCount;
+        const sleepTime = backoff + Math.random() * 1000;
+        console.warn(`⏳ Erro temporário do servidor. Aguardando ${(sleepTime/1000).toFixed(2)}s...`);
+        await new Promise(r => setTimeout(r, sleepTime));
+        sleepsCount++;
+        backoff *= 2;
+        keysTriedForCurrentModel = 0;
       }
-      
-      const sleepTime = backoff + Math.random() * 1000;
-      console.warn(`⚠️ Gemini Direct: Erro temporário (${err.message || '503/429'}). Tentativa ${attempt + 1}/${maxRetries} falhou. Retentando em ${(sleepTime/1000).toFixed(2)}s...`);
-      await new Promise(r => setTimeout(r, sleepTime));
-      backoff *= 2;
     }
   }
 }

@@ -9,8 +9,21 @@ import re
 import time
 import random
 import traceback
+import sys
+import io
 from google import genai
 from google.genai import types
+
+# Configura sys.stdout/err para UTF-8 no Windows para evitar crashes com emojis no console
+if sys.platform.startswith("win"):
+    try:
+        # Apenas reconfigura se o encoding não for utf-8
+        if sys.stdout and sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        if sys.stderr and sys.stderr.encoding and sys.stderr.encoding.lower() != 'utf-8':
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # Configuração via variáveis de ambiente e arquivo .env (múltiplas chaves suportadas)
 API_KEYS = []
@@ -151,8 +164,9 @@ def load_prompt() -> str:
 
 def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2, config=None, pdf_path=None):
     """
-    Executa client.models.generate_content com lógica de retentativa exponencial
-    e rotação de chaves/clientes de API para lidar com alta demanda e limites de taxa.
+    Executa client.models.generate_content com lógica de retentativa exponencial,
+    rotação de chaves/clientes de API (contas diferentes) e fallback automático para gemini-2.5-flash
+    se a cota do modelo pro for excedida em todas as chaves.
     Garante que o upload de arquivos PDF seja feito pelo mesmo cliente ativo na tentativa.
     """
     backoff = initial_backoff
@@ -161,13 +175,20 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
     if client in clients:
         current_idx = clients.index(client)
         
-    for attempt in range(max_retries):
-        active_client = clients[current_idx % len(clients)]
+    keys_count = len(clients)
+    base_model = model
+    current_model = base_model
+    
+    keys_tried_for_current_model = 0
+    sleeps_count = 0
+    
+    while True:
+        active_client = clients[current_idx % keys_count]
         uploaded_file = None
         try:
             actual_contents = contents
             if pdf_path:
-                print(f"📤 Gemini API (Chave {current_idx % len(clients) + 1}): Fazendo upload do PDF nativo...")
+                print(f"📤 Gemini API (Chave {current_idx % keys_count + 1}): Fazendo upload do PDF nativo...")
                 uploaded_file = active_client.files.upload(file=pdf_path)
                 
                 # Aguarda o processamento do arquivo
@@ -187,34 +208,75 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
                 actual_contents = [uploaded_file, contents]
 
             response = active_client.models.generate_content(
-                model=model,
+                model=current_model,
                 contents=actual_contents,
                 config=config
             )
             return response
+            
         except Exception as e:
             err_msg = str(e)
-            is_temporary = any(term in err_msg for term in [
-                "503", "504", "429", "UNAVAILABLE", "ResourceExhausted", 
-                "RESOURCE_EXHAUSTED", "ServiceUnavailable", "temporary", 
+            is_quota_limit = any(term in err_msg for term in [
+                "429", "RESOURCE_EXHAUSTED", "ResourceExhausted", "quota"
+            ])
+            is_temporary = is_quota_limit or any(term in err_msg for term in [
+                "503", "504", "UNAVAILABLE", "ServiceUnavailable", "temporary", 
                 "Please try again later", "overloaded", "high demand"
             ])
             
-            # Se for a última tentativa ou o erro não for temporário, joga a exceção
-            if attempt == max_retries - 1 or not is_temporary:
-                print(f"❌ Gemini: Falha definitiva no generate_content na tentativa {attempt + 1}: {e}")
+            # Se ocorrer um erro permanente (ex: chave inválida), tenta rotacionar se houver outras chaves
+            if not is_temporary:
+                if keys_count > 1 and keys_tried_for_current_model < keys_count - 1:
+                    print(f"⚠️ Gemini API: Erro permanente na chave {current_idx % keys_count + 1}. Tentando próxima chave...")
+                    current_idx += 1
+                    keys_tried_for_current_model += 1
+                    continue
+                print(f"❌ Gemini: Falha definitiva devido a erro permanente: {e}")
                 raise e
             
-            # Se houver múltiplas chaves configuradas, rotaciona para a próxima
-            if len(clients) > 1:
+            if is_quota_limit:
+                keys_tried_for_current_model += 1
+                if keys_tried_for_current_model >= keys_count:
+                    # Todas as chaves retornaram cota esgotada para o modelo atual
+                    if current_model == "gemini-2.5-pro":
+                        print(f"🔄 Gemini API: Cota do PRO excedida em todas as {keys_count} chaves. Fazendo fallback para gemini-2.5-flash...")
+                        current_model = "gemini-2.5-flash"
+                        keys_tried_for_current_model = 0
+                        # Tenta imediatamente com o Flash na chave atual (sem dormir)
+                        continue
+                    else:
+                        # Cota esgotada em tudo (Pro e Flash em todas as chaves)
+                        if sleeps_count >= max_retries:
+                            print(f"❌ Gemini: Limite de retentativas esgotado. Cota excedida em todas as chaves e modelos.")
+                            raise e
+                        
+                        sleep_time = backoff + random.uniform(0, 1)
+                        print(f"⚠️ Gemini: Cota esgotada em todas as chaves e modelos. Aguardando {sleep_time:.2f}s antes de tentar novamente...")
+                        time.sleep(sleep_time)
+                        sleeps_count += 1
+                        backoff *= 2
+                        keys_tried_for_current_model = 0
+                        current_model = base_model # Reinicia tentativa com o modelo original
+                else:
+                    # Rotaciona para a próxima chave e tenta imediatamente
+                    current_idx += 1
+                    print(f"🔄 Gemini API: Cota excedida. Rotacionando para a chave API {current_idx % keys_count + 1} com {current_model}...")
+                    continue
+            else:
+                # Outro erro temporário (ex: 503/504)
+                if sleeps_count >= max_retries:
+                    print(f"❌ Gemini: Falha definitiva após {sleeps_count} tentativas devido a erro temporário: {e}")
+                    raise e
+                
+                # Rotaciona chave e dorme antes de retentar
                 current_idx += 1
-                print(f"🔄 Gemini: Rotacionando para a chave API {current_idx % len(clients) + 1} devido a erro temporário: {err_msg}")
-            
-            # Aplica backoff exponencial com jitter
-            sleep_time = backoff + random.uniform(0, 1)
-            print(f"⚠️ Gemini: Erro temporário ({err_msg}). Tentativa {attempt + 1}/{max_retries} falhou. Retentando em {sleep_time:.2f}s...")
-            time.sleep(sleep_time)
-            backoff *= 2 # Dobra o intervalo
+                sleep_time = backoff + random.uniform(0, 1)
+                print(f"⚠️ Gemini: Erro temporário ({err_msg}). Rotacionando para chave {current_idx % keys_count + 1} e aguardando {sleep_time:.2f}s...")
+                time.sleep(sleep_time)
+                sleeps_count += 1
+                backoff *= 2
+                keys_tried_for_current_model = 0
+                
         finally:
             if uploaded_file:
                 try:
