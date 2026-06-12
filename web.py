@@ -358,6 +358,30 @@ def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = 
         print(f"❌ Firebase: Erro ao fazer upload de {filename}: {e}")
 
 
+def _download_file_from_firebase(project_name: str, filename: str, is_asset: bool = False) -> bool:
+    b = get_bucket()
+    if not b:
+        return False
+    try:
+        local_proj_dir = os.path.join(PROJECTS, project_name)
+        if is_asset:
+            local_path = os.path.join(local_proj_dir, "assets", filename)
+            blob_path = f"projects/{project_name}/assets/{filename}"
+        else:
+            local_path = os.path.join(local_proj_dir, filename)
+            blob_path = f"projects/{project_name}/{filename}"
+            
+        blob = b.blob(blob_path)
+        if blob.exists():
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            blob.download_to_filename(local_path)
+            print(f"📥 Firebase: Sincronizado arquivo individual {blob_path} -> {local_path}")
+            return True
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao baixar arquivo individual {filename}: {e}")
+    return False
+
+
 def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
     b = get_bucket()
     if not b:
@@ -716,10 +740,16 @@ def api_generate():
 # ════════════════════════════════════════
 @app.route("/projects/<project>/pdf/<path:filename>")
 def serve_pdf(project, filename):
+    filepath = os.path.join(_pdir(project), filename)
+    if not os.path.isfile(filepath):
+        _download_file_from_firebase(project, filename, is_asset=False)
     return send_from_directory(_pdir(project), filename)
 
 @app.route("/projects/<project>/assets/<path:filename>")
 def serve_asset(project, filename):
+    filepath = os.path.join(_adir(project), filename)
+    if not os.path.isfile(filepath):
+        _download_file_from_firebase(project, filename, is_asset=True)
     return send_from_directory(_adir(project), filename)
 
 @app.route("/api/instrucoes-ia")
