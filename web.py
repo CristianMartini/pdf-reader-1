@@ -320,6 +320,12 @@ def _sync_project_from_firebase(project_name: str, force: bool = False):
                 continue
             
             rel_path = os.path.relpath(blob.name, f"projects/{project_name}")
+            
+            # ATENÇÃO: Sincroniza localmente apenas markdowns e .keep.
+            # Imagens e PDFs são armazenados na nuvem e baixados sob demanda.
+            if not (rel_path.endswith(".md") or rel_path == ".keep"):
+                continue
+                
             local_file_path = os.path.join(local_proj_dir, rel_path)
             
             if os.path.exists(local_file_path):
@@ -380,6 +386,26 @@ def _download_file_from_firebase(project_name: str, filename: str, is_asset: boo
     except Exception as e:
         print(f"❌ Firebase: Erro ao baixar arquivo individual {filename}: {e}")
     return False
+
+
+def _download_all_assets(project_name: str):
+    b = get_bucket()
+    if not b:
+        return
+    try:
+        prefix = f"projects/{project_name}/assets/"
+        blobs = b.list_blobs(prefix=prefix)
+        local_adir = _adir(project_name)
+        for blob in blobs:
+            if blob.name.endswith('/'):
+                continue
+            rel_path = os.path.relpath(blob.name, f"projects/{project_name}/assets")
+            local_path = os.path.join(local_adir, rel_path)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            blob.download_to_filename(local_path)
+            print(f"📥 Firebase PDF Gen: Baixado asset {blob.name} -> {local_path}")
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao baixar todos os assets para PDF gen: {e}")
 
 
 def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
@@ -519,17 +545,60 @@ def api_delete_project(project):
 @app.route("/api/files/<project>")
 def api_files(project):
     force = request.args.get("force", "").lower() == "true"
-    # Sincroniza do Firebase antes de carregar arquivos
+    # Sincroniza apenas markdowns do Firebase
     _sync_project_from_firebase(project, force=force)
-    pd = _pdir(project)
-    ad = _adir(project)
-    mds  = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(pd, "*.md")))]
-    imgs = [os.path.basename(p) for p in sorted(
-        glob.glob(os.path.join(ad, "*.*")), key=os.path.getmtime, reverse=True
-    )]
-    pdfs = [os.path.basename(p) for p in sorted(
-        glob.glob(os.path.join(pd, "*.pdf")), key=os.path.getmtime, reverse=True
-    )]
+    
+    b = get_bucket()
+    mds = []
+    imgs = []
+    pdfs = []
+    
+    if b:
+        try:
+            prefix = f"projects/{project}/"
+            blobs = list(b.list_blobs(prefix=prefix))
+            # Ordena blobs pelo tempo de modificação (updated) decrescente
+            blobs_sorted = sorted(blobs, key=lambda x: x.updated if x.updated else 0, reverse=True)
+            
+            for blob in blobs_sorted:
+                if blob.name.endswith('/'):
+                    continue
+                rel_path = os.path.relpath(blob.name, f"projects/{project}")
+                # Normaliza separadores de caminho para barras normais (essencial no Windows)
+                rel_path = rel_path.replace('\\', '/')
+                if rel_path == ".keep":
+                    continue
+                    
+                if rel_path.startswith("assets/"):
+                    img_name = os.path.basename(rel_path)
+                    if img_name and img_name not in imgs:
+                        imgs.append(img_name)
+                elif rel_path.endswith(".pdf"):
+                    pdf_name = os.path.basename(rel_path)
+                    if pdf_name and pdf_name not in pdfs:
+                        pdfs.append(pdf_name)
+                elif rel_path.endswith(".md"):
+                    md_name = os.path.basename(rel_path)
+                    if md_name and md_name not in mds:
+                        mds.append(md_name)
+            
+            # Markdowns são exibidos ordenados alfabeticamente
+            mds.sort()
+        except Exception as e:
+            print(f"❌ Firebase: Erro ao listar arquivos de {project}: {e}")
+            
+    # Fallback para listagem local caso o Firebase falhe
+    if not mds and not imgs and not pdfs:
+        pd = _pdir(project)
+        ad = _adir(project)
+        mds  = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(pd, "*.md")))]
+        imgs = [os.path.basename(p) for p in sorted(
+            glob.glob(os.path.join(ad, "*.*")), key=os.path.getmtime, reverse=True
+        )]
+        pdfs = [os.path.basename(p) for p in sorted(
+            glob.glob(os.path.join(pd, "*.pdf")), key=os.path.getmtime, reverse=True
+        )]
+        
     return jsonify(mds=mds, imgs=imgs, pdfs=pdfs)
 
 
@@ -572,10 +641,18 @@ def api_upload(project, kind):
     for f in files:
         if f.filename:
             safe_name = secure_filename(f.filename)
-            f.save(os.path.join(dest_dir, safe_name))
+            local_path = os.path.join(dest_dir, safe_name)
+            f.save(local_path)
             # Upload para o Firebase
             _upload_file_to_firebase(project, safe_name, is_asset=(kind != "md"))
             saved += 1
+            
+            # Remove o arquivo local se for uma imagem ou PDF para economizar espaço
+            if kind != "md":
+                try:
+                    os.remove(local_path)
+                except Exception:
+                    pass
     return jsonify(ok=True, saved=saved)
 
 
@@ -649,11 +726,15 @@ def api_upload_confirm(project, kind):
         return jsonify(ok=False, error="Tipo inválido")
 
     try:
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
         blob = b.blob(blob_path)
         if blob.exists():
-            blob.download_to_filename(local_path)
-            print(f"📥 Firebase: Download pós-upload concluído para {local_path}")
+            if kind == "md":
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                blob.download_to_filename(local_path)
+                print(f"📥 Firebase: Download pós-upload concluído para {local_path}")
+            else:
+                # Evita salvar arquivos grandes de mídia localmente no container serverless
+                print(f"✅ Firebase: Confirmado upload de asset remoto {blob_path}")
             return jsonify(ok=True)
         else:
             return jsonify(ok=False, error="Blob não encontrado no storage remoto")
@@ -709,9 +790,6 @@ def api_generate():
     if not files:
         return jsonify(ok=False, error="Nenhum arquivo selecionado")
 
-    # Sincroniza todas as imagens (assets) e arquivos do Firebase antes de gerar o PDF
-    _sync_project_from_firebase(project, force=True)
-
     from engine.template import build_from_md, extract_meta
 
     pd      = _pdir(project)
@@ -719,6 +797,11 @@ def api_generate():
     results = []
 
     try:
+        # Sincroniza apenas markdowns do Firebase antes da geração
+        _sync_project_from_firebase(project, force=True)
+        # Pré-baixa todas as imagens (assets) necessárias para compilação local
+        _download_all_assets(project)
+
         for fname in files:
             md_path     = os.path.join(pd, secure_filename(fname))
             pdf_name    = os.path.splitext(fname)[0] + ".pdf"
@@ -729,10 +812,24 @@ def api_generate():
                 # Upload do PDF gerado para o Firebase
                 _upload_file_to_firebase(project, pdf_name, is_asset=False)
                 results.append(os.path.basename(output_path))
+                
+                # Remove o PDF local imediatamente após o upload para economizar espaço
+                try:
+                    os.remove(output_path)
+                except Exception:
+                    pass
         return jsonify(ok=True, result=results)
     except Exception as e:
         traceback.print_exc()
         return jsonify(ok=False, error=str(e))
+    finally:
+        # Garante a limpeza de toda a pasta de assets locais temporários do container serverless
+        try:
+            if os.path.isdir(ad):
+                shutil.rmtree(ad)
+                print(f"🗑️ Local: Limpo diretório de assets temporários pós-compilação: {ad}")
+        except Exception as ex:
+            print(f"⚠️ Erro ao limpar assets temporários: {ex}")
 
 
 # ════════════════════════════════════════
