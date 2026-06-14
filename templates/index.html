@@ -422,20 +422,78 @@ async function loadFiles(force=false) {
   }
 }
 
-function downloadAllMds() {
+async function downloadAllMds() {
   if (!proj) {
     toast("Selecione um projeto primeiro", "error");
     return;
   }
-  window.location.href = `/api/projects/${encodeURIComponent(proj)}/download-mds`;
+  const btn = document.querySelector("button[onclick='downloadAllMds()']");
+  const originalHtml = btn.innerHTML;
+  try {
+    btn.disabled = true;
+    btn.innerHTML = "<span class='spinning'>⏳</span> Preparando...";
+    toast("Preparando seu arquivo ZIP com os documentos...", "info");
+    
+    const url = `/api/projects/${encodeURIComponent(proj)}/download-mds`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Erro do servidor (${res.status})`);
+    }
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.download = `${proj}_markdowns.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(downloadUrl);
+    toast("✅ Download concluído!", "success");
+  } catch (err) {
+    console.error(err);
+    toast(`❌ Falha ao baixar ZIP: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
 }
 
-function downloadAllPdfs() {
+async function downloadAllPdfs() {
   if (!proj) {
     toast("Selecione um projeto primeiro", "error");
     return;
   }
-  window.location.href = `/api/projects/${encodeURIComponent(proj)}/download-pdfs`;
+  const btn = document.querySelector("button[onclick='downloadAllPdfs()']");
+  const originalHtml = btn.innerHTML;
+  try {
+    btn.disabled = true;
+    btn.innerHTML = "<span class='spinning'>⏳</span> Preparando...";
+    toast("Preparando seu arquivo ZIP com todos os PDFs. Isso pode levar alguns segundos...", "info");
+    
+    const url = `/api/projects/${encodeURIComponent(proj)}/download-pdfs`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Erro do servidor (${res.status})`);
+    }
+    const blob = await res.blob();
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = downloadUrl;
+    a.download = `${proj}_pdfs.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(downloadUrl);
+    toast("✅ Download concluído!", "success");
+  } catch (err) {
+    console.error(err);
+    toast(`❌ Falha ao baixar ZIP: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
 }
 
 async function loadFile(filename) {
