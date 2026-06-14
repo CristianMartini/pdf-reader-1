@@ -382,12 +382,75 @@ def header_footer(canvas, doc, assets: str):
 
 
 def _format_inline(text: str) -> str:
-    """Converte markdown inline (**bold**, *italic*) para tags do ReportLab."""
-    # Negrito
-    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    # Itálico
-    text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
-    return text
+    """Converte markdown inline (**bold**, *italic*) para tags do ReportLab de forma robusta e segura."""
+    # 1. Escapa '&' que não iniciam entidades conhecidas do XML
+    text = re.sub(r'&(?!(amp|lt|gt|quot|apos);)', '&amp;', text)
+    
+    # 2. Converte Markdown (** e *) para tags HTML usando pilha para garantir aninhamento perfeito (sem tags cruzadas)
+    tokens = re.split(r'(\*\*|\*)', text)
+    result = []
+    stack = []
+    for token in tokens:
+        if token == '**':
+            if 'b' in stack:
+                while stack:
+                    closed_tag = stack.pop()
+                    result.append(f'</{closed_tag}>')
+                    if closed_tag == 'b':
+                        break
+            else:
+                result.append('<b>')
+                stack.append('b')
+        elif token == '*':
+            if 'i' in stack:
+                while stack:
+                    closed_tag = stack.pop()
+                    result.append(f'</{closed_tag}>')
+                    if closed_tag == 'i':
+                        break
+            else:
+                result.append('<i>')
+                stack.append('i')
+        else:
+            result.append(token)
+    while stack:
+        closed_tag = stack.pop()
+        result.append(f'</{closed_tag}>')
+        
+    html = "".join(result)
+    
+    # Remove tags vazias redundantes geradas por tokens markdown residuais
+    html = html.replace('<b></b>', '').replace('<i></i>', '')
+    
+    # 3. Protege tags HTML válidas suportadas nativamente pelo ReportLab
+    placeholders = {
+        '<b>': '\uE000', '</b>': '\uE001',
+        '<i>': '\uE002', '</i>': '\uE003',
+        '<sub>': '\uE004', '</sub>': '\uE005',
+        '<sup>': '\uE006', '</sup>': '\uE007',
+        '<u>': '\uE008', '</u>': '\uE009'
+    }
+    
+    # Substituição case-insensitive
+    for tag, placeholder in placeholders.items():
+        pattern = re.compile(re.escape(tag), re.IGNORECASE)
+        html = pattern.sub(placeholder, html)
+        
+    # 4. Escapa qualquer '<' e '>' restante na string que possa quebrar o parser XML do ReportLab
+    html = html.replace('<', '&lt;').replace('>', '&gt;')
+    
+    # 5. Restaura as tags permitidas que estavam protegidas
+    for tag, placeholder in placeholders.items():
+        html = html.replace(placeholder, tag)
+        
+    # 6. Garante o fechamento automático de tags permitidas se alguma tiver ficado desbalanceada
+    for tag in ['b', 'i', 'sub', 'sup', 'u']:
+        open_count = html.count(f'<{tag}>') + html.count(f'<{tag.upper()}>')
+        close_count = html.count(f'</{tag}>') + html.count(f'</{tag.upper()}>')
+        if open_count > close_count:
+            html += f'</{tag}>' * (open_count - close_count)
+            
+    return html
 
 # ════════════════════════════════════════
 # PARSER MARKDOWN — robusto e auditado
