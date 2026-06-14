@@ -908,14 +908,62 @@ Para criar transições claras entre tópicos distintos, use três traços em um
 
 
 def _extract_text_from_pdf(filepath: str) -> str:
+    import re
     from pypdf import PdfReader
+    
+    print(f"📄 Extraindo texto de PDF de forma otimizada (sem imagens/cabeçalhos/rodapés): {filepath}")
     reader = PdfReader(filepath)
-    text = ""
+    
+    pages_lines = []
+    header_footer_candidates = {}
+    
     for page in reader.pages:
         t = page.extract_text()
         if t:
-            text += t + "\n"
-    return text
+            # Divide e remove espaços em branco das linhas
+            lines = [line.strip() for line in t.splitlines()]
+            pages_lines.append(lines)
+            
+            # Coleta candidatos a cabeçalho/rodapé (primeiras 2 e últimas 2 linhas)
+            candidates = []
+            if len(lines) >= 1:
+                candidates.append(lines[0])
+            if len(lines) >= 2:
+                candidates.append(lines[1])
+            if len(lines) >= 2:
+                candidates.append(lines[-1])
+            if len(lines) >= 3:
+                candidates.append(lines[-2])
+                
+            for c in set(candidates):
+                if c:
+                    header_footer_candidates[c] = header_footer_candidates.get(c, 0) + 1
+        else:
+            pages_lines.append([])
+            
+    # Se a mesma linha se repete em 3 ou mais páginas na borda, é considerada cabeçalho/rodapé
+    header_footers = {line for line, count in header_footer_candidates.items() if count >= 3}
+    
+    cleaned_text_parts = []
+    for lines in pages_lines:
+        cleaned_lines = []
+        for line in lines:
+            if line in header_footers:
+                continue
+                
+            # Heurística para pular numerações de página (Ex: Página 1, Pag 2, 3 de 10, numerais sozinhos)
+            lower_line = line.lower()
+            if re.match(r'^p[áa]g\s*\.?\s*\d+$|^p[áa]gina\s*\d+$|^\d+$|^\d+\s*/\s*\d+$|^\d+\s*de\s*\d+$', lower_line):
+                continue
+                
+            cleaned_lines.append(line)
+        if cleaned_lines:
+            cleaned_text_parts.append("\n".join(cleaned_lines))
+            
+    full_text = "\n\n".join(cleaned_text_parts)
+    # Reduz quebras de linha consecutivas excessivas para economizar tokens
+    full_text = re.sub(r'\n{3,}', '\n\n', full_text)
+    return full_text
 
 
 # ════════════════════════════════════════
@@ -1035,6 +1083,27 @@ def api_queue_extract(project):
             raw_text = _extract_text_from_pdf(filepath)
             if not raw_text.strip():
                 return jsonify(ok=False, error="O PDF parece estar vazio ou é uma imagem escaneada sem texto.")
+            
+            # Salva rascunho de texto limpo no Firebase para persistência / auditoria
+            if b:
+                try:
+                    txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
+                    local_txt_path = filepath + ".txt"
+                    with open(local_txt_path, "w", encoding="utf-8") as f:
+                        f.write(raw_text)
+                    
+                    blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
+                    blob_txt = b.blob(blob_txt_path)
+                    blob_txt.upload_from_filename(local_txt_path)
+                    print(f"📤 Firebase: Backup de texto limpo enviado para {blob_txt_path}")
+                    
+                    # Remove local txt temp copy
+                    try:
+                        os.remove(local_txt_path)
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"⚠️ Firebase: Erro ao fazer upload de backup de texto: {ex}")
         elif ext in (".md", ".txt"):
             with open(filepath, "r", encoding="utf-8") as f:
                 raw_text = f.read()
@@ -1226,7 +1295,8 @@ def api_queue_process(project):
         
         ext = os.path.splitext(safe_name)[1].lower()
         if ext == ".pdf":
-            rewritten_markdown = process_content_to_style(filepath, is_pdf=True)
+            raw_text = _extract_text_from_pdf(filepath)
+            rewritten_markdown = process_content_to_style(raw_text, is_pdf=False)
         elif ext in (".md", ".txt"):
             with open(filepath, "r", encoding="utf-8") as f:
                 raw_text = f.read()
@@ -1258,6 +1328,14 @@ def api_queue_process(project):
                 if blob.exists():
                     blob.delete()
                     print(f"🗑️ Firebase: Backup temporário removido de {blob_path}")
+                
+                # Remove o backup .txt temporário se existir
+                txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
+                blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
+                blob_txt = b.blob(blob_txt_path)
+                if blob_txt.exists():
+                    blob_txt.delete()
+                    print(f"🗑️ Firebase: Backup de texto temporário removido de {blob_txt_path}")
             except Exception:
                 pass
             
@@ -1265,13 +1343,19 @@ def api_queue_process(project):
         
     except Exception as e:
         traceback.print_exc()
-        # Garante que removemos do Firebase mesmo em caso de erro no processamento
+        # Garante que removemos os backups do Firebase mesmo em caso de erro no processamento
         if b:
             try:
                 blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
                 blob = b.blob(blob_path)
                 if blob.exists():
                     blob.delete()
+                
+                txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
+                blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
+                blob_txt = b.blob(blob_txt_path)
+                if blob_txt.exists():
+                    blob_txt.delete()
             except Exception:
                 pass
         return jsonify(ok=False, error=str(e))
