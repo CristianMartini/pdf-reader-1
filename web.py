@@ -1308,6 +1308,46 @@ def api_download_project_mds(project):
     )
 
 
+@app.route("/api/projects/<project>/download-pdfs")
+def api_download_project_pdfs(project):
+    import io
+    import zipfile
+    from flask import send_file
+
+    safe_proj = secure_filename(project)
+    
+    b = get_bucket()
+    if not b:
+        return jsonify(ok=False, error="Firebase inativo ou não configurado")
+        
+    prefix = f"projects/{safe_proj}/"
+    blobs = b.list_blobs(prefix=prefix)
+    
+    memory_file = io.BytesIO()
+    has_files = False
+    
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for blob in blobs:
+            if blob.name.endswith(".pdf"):
+                pdf_data = blob.download_as_bytes()
+                basename = os.path.basename(blob.name)
+                zip_path = f"{project}/{basename}"
+                zipf.writestr(zip_path, pdf_data)
+                has_files = True
+                
+    if not has_files:
+        return jsonify(ok=False, error="Nenhum PDF encontrado neste projeto")
+        
+    memory_file.seek(0)
+    
+    return send_file(
+        memory_file,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{safe_proj}_pdfs.zip"
+    )
+
+
 # ════════════════════════════════════════
 # MAIN
 # ════════════════════════════════════════
