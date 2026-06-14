@@ -533,8 +533,30 @@ def api_create_project():
 def api_delete_project(project):
     pd = _pdir(project)
     if os.path.isdir(pd):
-        shutil.rmtree(pd)
-    # Excluir todos os arquivos do projeto no Firebase (mesmo que o diretório local não exista)
+        import time
+        import stat
+        
+        # Renomeia a pasta para um diretório oculto antes de apagar para sumir da listagem imediatamente,
+        # mesmo se a exclusão física falhar devido a bloqueios do Windows (arquivos abertos)
+        deleted_name = f".deleted_{secure_filename(project)}_{int(time.time())}"
+        dp = os.path.join(PROJECTS, deleted_name)
+        try:
+            os.rename(pd, dp)
+            target_dir = dp
+        except Exception as e:
+            print(f"⚠️ Windows: Não foi possível renomear a pasta do projeto: {e}")
+            target_dir = pd
+            
+        try:
+            # Tenta remover recursivamente com manipulador de permissão somente-leitura
+            def remove_readonly(func, path, excinfo):
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            shutil.rmtree(target_dir, onerror=remove_readonly)
+        except Exception as e:
+            print(f"⚠️ Erro ao remover pasta do projeto local: {e}")
+            
+    # Exclui todos os arquivos do projeto no Firebase (mesmo que o diretório local não exista)
     _delete_project_from_firebase(project)
     return jsonify(ok=True)
 
@@ -1254,6 +1276,50 @@ def api_queue_save(project):
                 pass
                 
         return jsonify(ok=True, saved_as=dest_filename)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=str(e))
+
+
+@app.route("/api/queue/delete/<project>", methods=["POST"])
+def api_queue_delete(project):
+    data = request.json or {}
+    safe_name = secure_filename(data.get("filename", ""))
+    
+    if not safe_name:
+        return jsonify(ok=False, error="Nome de arquivo inválido")
+        
+    try:
+        # 1. Limpar arquivo temporário local
+        project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+        filepath = os.path.join(project_queue_dir, safe_name)
+        try:
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+        except Exception:
+            pass
+            
+        # 2. Limpar backups no Firebase Storage
+        b = get_bucket()
+        if b:
+            try:
+                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob = b.blob(blob_path)
+                if blob.exists():
+                    blob.delete()
+                    print(f"🗑️ Firebase: Backup temporário deletado: {blob_path}")
+                
+                # Também tenta deletar o backup .txt se existir
+                txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
+                blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
+                blob_txt = b.blob(blob_txt_path)
+                if blob_txt.exists():
+                    blob_txt.delete()
+                    print(f"🗑️ Firebase: Backup de texto deletado: {blob_txt_path}")
+            except Exception as ex:
+                print(f"⚠️ Firebase: Erro ao deletar backups: {ex}")
+                
+        return jsonify(ok=True)
     except Exception as e:
         traceback.print_exc()
         return jsonify(ok=False, error=str(e))

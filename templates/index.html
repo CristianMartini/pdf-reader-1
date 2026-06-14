@@ -193,6 +193,17 @@ let _mdSig = "", _pdfSig = "", _imgSig = "";
 let _toastT = null;
 let uploadQueue = []; // Fila de uploads para IA
 let isProcessingQueue = false;
+let shouldStopProcessing = false;
+
+function stopQueueProcessing() {
+  shouldStopProcessing = true;
+  const btnStop = document.getElementById("btnStopQueue");
+  if (btnStop) {
+    btnStop.disabled = true;
+    btnStop.innerHTML = '<span class="spinning">⏳</span> Parando...';
+  }
+  toast("🛑 Interrompendo processamento...", "warning");
+}
 
 // ══ PROJETOS ══
 async function loadProjects() {
@@ -252,36 +263,46 @@ function renderMain() {
     <div style="display: flex; flex-direction: column; gap: 1.2rem;">
       
       <!-- CARD PASSO 1: IMPORTADOR EM LOTE COM IA -->
-      <div class="card">
-        <div class="card-title">
+      <div class="card" style="position: relative; overflow: hidden; background: linear-gradient(145deg, #ffffff, #fbfcfe); border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);">
+        <!-- Linha dourada/azul sutil no topo do card -->
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--navy), var(--gold));"></div>
+        
+        <div class="card-title" style="margin-bottom: 0.5rem;">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 1</span>
-            <span>🤖 Importar Aulas (Lote/IA)</span>
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700; box-shadow: 0 2px 4px rgba(1, 22, 65, 0.15);">Passo 1</span>
+            <span style="font-weight: 700; color: var(--navy);">🤖 Importar Aulas (Lote/IA)</span>
           </div>
         </div>
-        <p class="muted" style="margin-bottom:.8rem; line-height: 1.4;">
-          Suba múltiplos arquivos <b>.pdf</b> ou <b>.md</b> antigos. A IA extrairá o texto e reescreverá no padrão Evolux.
+        
+        <p class="muted" style="margin-bottom: 1rem; line-height: 1.5; font-size: 0.82rem;">
+          Selecione múltiplos arquivos <b>.pdf</b> ou <b>.md</b> antigos. A IA extrairá o texto de forma otimizada (sem custo visual de tokens) e estruturará no estilo premium Evolux.
         </p>
         
-        <div style="border: 2px dashed var(--border); padding: 1.2rem; text-align: center; border-radius: 8px; cursor: pointer; transition: border-color .15s;" 
+        <!-- Dropzone Premium -->
+        <div style="border: 2px dashed rgba(208, 148, 40, 0.4); padding: 1.8rem 1.2rem; text-align: center; border-radius: 12px; cursor: pointer; transition: all 0.25s ease; background: rgba(249, 251, 255, 0.5); position: relative; overflow: hidden;" 
              id="dropZone"
              onclick="document.getElementById('queueUp').click()"
-             onmouseover="this.style.borderColor='var(--gold)'"
-             onmouseout="this.style.borderColor='var(--border)'">
-          <span style="font-size: 1.5rem; display: block; margin-bottom: 4px;">📤</span>
-          <span style="font-size: .85rem; font-weight: 600; color: var(--navy);">Selecionar arquivos .pdf ou .md</span>
+             onmouseover="this.style.borderColor='var(--gold)'; this.style.background='rgba(249, 251, 255, 0.85)'; this.style.boxShadow='0 4px 12px rgba(208, 148, 40, 0.08)';"
+             onmouseout="this.style.borderColor='rgba(208, 148, 40, 0.4)'; this.style.background='rgba(249, 251, 255, 0.5)'; this.style.boxShadow='none';">
+          <div style="font-size: 2rem; display: block; margin-bottom: 6px; filter: drop-shadow(0 3px 6px rgba(1, 22, 65, 0.1));">📤</div>
+          <span style="font-size: .88rem; font-weight: 700; color: var(--navy); display: block; margin-bottom: 2px;">Selecionar arquivos .pdf ou .md</span>
+          <span style="font-size: .74rem; color: var(--muted);">Arraste-os para cá ou clique para explorar</span>
           <input type="file" id="queueUp" accept=".md,.pdf" multiple style="display:none" onchange="addFilesToQueue(this)">
         </div>
         
-        <div id="queueSection" style="display:none; margin-top: 1rem;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
-            <div style="display:flex; align-items:center; gap:6px;">
-              <input type="checkbox" id="queueCheckAll" checked style="cursor:pointer; width:16px; height:16px;" onchange="toggleSelectAllQueue(this.checked)">
+        <!-- Seção da Fila de Processamento -->
+        <div id="queueSection" style="display:none; margin-top: 1.2rem; border-top: 1px solid var(--border); padding-top: 1rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.8rem; gap: 8px; flex-wrap: wrap;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="queueCheckAll" checked style="cursor:pointer; width:16px; height:16px; accent-color: var(--navy);" onchange="toggleSelectAllQueue(this.checked)">
               <span style="font-size:.82rem; font-weight:700; color:var(--navy);">Fila (<span id="queueCount">0</span>)</span>
             </div>
-            <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()">▶ Processar Selecionados</button>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-gold btn-sm" id="btnProcessQueue" onclick="processQueue()" style="box-shadow: 0 2px 4px rgba(208,148,40,0.15);">▶ Processar Selecionados</button>
+              <button class="btn btn-danger btn-sm" id="btnStopQueue" style="display:none; box-shadow: 0 2px 4px rgba(239,68,68,0.2); font-weight: bold; background-color: #ef4444; color: white;" onclick="stopQueueProcessing()">🛑 Parar</button>
+            </div>
           </div>
-          <div class="file-list" id="queueList" style="max-height: 200px;"></div>
+          <div class="file-list" id="queueList" style="max-height: 220px; border: 1px solid var(--border); border-radius: 8px; background: #fafbfc; padding: 4px; overflow-y: auto;"></div>
         </div>
       </div>
 
@@ -940,38 +961,38 @@ function renderQueue() {
     let checkbox = "";
     
     if (item.status === "pending" || item.status === "failed") {
-      checkbox = `<input type="checkbox" class="queue-check" ${item.checked ? 'checked' : ''} style="cursor:pointer; width:16px; height:16px;" onchange="toggleQueueItemChecked(${idx}, this.checked)" ${isProcessingQueue ? 'disabled' : ''}>`;
+      checkbox = `<input type="checkbox" class="queue-check" ${item.checked ? 'checked' : ''} style="cursor:pointer; width:18px; height:18px; accent-color: var(--navy);" onchange="toggleQueueItemChecked(${idx}, this.checked)" ${isProcessingQueue ? 'disabled' : ''}>`;
     } else {
-      checkbox = `<div style="width:16px; height:16px;"></div>`;
+      checkbox = `<div style="width:18px; height:18px;"></div>`;
     }
     
     if (item.status === "pending") {
-      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dde3f0; color:var(--text);">Pendente</span>`;
+      statusBadge = `<span style="font-size:.72rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#e2e8f0; color:#475569;">Pendente</span>`;
     } else if (item.status === "processing") {
-      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#f9d549; color:var(--navy);"><span class="spinning">⏳</span> ${item.status_msg || 'Processando...'}</span>`;
+      statusBadge = `<span style="font-size:.72rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#fef08a; color:#854d0e;"><span class="spinning" style="margin-right:2px;">⏳</span> ${item.status_msg || 'Processando...'}</span>`;
     } else if (item.status === "completed") {
-      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#dcfce7; color:#15803d;">Pronto</span>`;
-      btnOpen = `<button class="btn btn-primary btn-sm" style="padding:2px 6px; font-size:.75rem;" onclick="loadFile('${item.saved_as}')">Editar</button>`;
-      btnReprocess = `<button class="btn btn-ghost btn-sm" style="padding:2px 6px; color:var(--gold); border-color:var(--gold);" onclick="reprocessQueueItem(${idx})" title="Reprocessar arquivo individual" ${isProcessingQueue ? 'disabled' : ''}>🔄</button>`;
+      statusBadge = `<span style="font-size:.72rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#dcfce7; color:#166534;">Pronto</span>`;
+      btnOpen = `<button class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.72rem; border-radius:6px;" onclick="loadFile('${item.saved_as}')">Editar</button>`;
+      btnReprocess = `<button class="btn btn-ghost btn-sm" style="padding:2px 6px; border-radius:6px; color:var(--gold); border-color:var(--gold);" onclick="reprocessQueueItem(${idx})" title="Reprocessar arquivo individual" ${isProcessingQueue ? 'disabled' : ''}>🔄</button>`;
     } else if (item.status === "failed") {
-      statusBadge = `<span style="font-size:.75rem; font-weight:600; padding:2px 6px; border-radius:4px; background:#fee2e2; color:#b91c1c;" title="${item.error || 'Erro desconhecido'}">Falha</span>`;
-      btnReprocess = `<button class="btn btn-ghost btn-sm" style="padding:2px 6px; color:var(--gold); border-color:var(--gold);" onclick="reprocessQueueItem(${idx})" title="Reprocessar arquivo individual" ${isProcessingQueue ? 'disabled' : ''}>🔄</button>`;
+      statusBadge = `<span style="font-size:.72rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#fee2e2; color:#991b1b;" title="${item.error || 'Erro desconhecido'}">Falha</span>`;
+      btnReprocess = `<button class="btn btn-ghost btn-sm" style="padding:2px 6px; border-radius:6px; color:var(--gold); border-color:var(--gold);" onclick="reprocessQueueItem(${idx})" title="Reprocessar arquivo individual" ${isProcessingQueue ? 'disabled' : ''}>🔄</button>`;
     }
     
     return `
-      <div class="file-item" style="justify-content:space-between; gap:10px; align-items:center;">
-        <div style="display:flex; align-items:center; gap:8px; flex:1;">
+      <div class="file-item" style="justify-content:space-between; gap:10px; align-items:center; padding:8px 12px; margin-bottom:6px; border:1px solid var(--border); border-radius:8px; background:#ffffff; transition:all 0.15s ease;" onmouseover="this.style.boxShadow='0 2px 6px rgba(0,0,0,0.03)';" onmouseout="this.style.boxShadow='none';">
+        <div style="display:flex; align-items:center; gap:10px; flex:1;">
           ${checkbox}
           <div style="display:flex; flex-direction:column; gap:2px; flex:1;">
-            <span style="font-weight:600; word-break:break-all;">${item.type === 'pdf' ? '📑' : '📄'} ${item.name}</span>
-            ${item.error ? `<span style="font-size:.72rem; color:var(--red); font-weight:normal;">${item.error}</span>` : ""}
+            <span style="font-weight:600; word-break:break-all; font-size:.82rem; color:var(--navy);">${item.type === 'pdf' ? '📑' : '📄'} ${item.name}</span>
+            ${item.error ? `<span style="font-size:.72rem; color:var(--red); font-weight:500;">${item.error}</span>` : ""}
           </div>
         </div>
-        <div style="display:flex; align-items:center; gap:6px;">
+        <div style="display:flex; align-items:center; gap:8px;">
           ${statusBadge}
           ${btnOpen}
           ${btnReprocess}
-          <button class="btn btn-ghost btn-sm" style="padding:2px 6px;" onclick="removeFromQueue(${idx})" ${isProcessingQueue ? 'disabled' : ''}>🗑</button>
+          <button class="btn btn-ghost btn-sm" style="padding:4px 8px; border-radius:6px;" onclick="removeFromQueue(${idx})" ${isProcessingQueue ? 'disabled' : ''} title="Remover da fila">🗑</button>
         </div>
       </div>
     `;
@@ -993,6 +1014,30 @@ function toggleSelectAllQueue(checked) {
     }
   });
   renderQueue();
+}
+
+async function removeFromQueue(idx) {
+  if (isProcessingQueue) return;
+  const item = uploadQueue[idx];
+  if (!confirm(`Remover "${item.name}" da fila?`)) return;
+  
+  try {
+    const res = await fetch(`/api/queue/delete/${encodeURIComponent(proj)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: item.safe_name })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.warn("Aviso ao remover no servidor:", data.error);
+    }
+  } catch (e) {
+    console.error("Erro de rede ao remover do servidor:", e);
+  }
+  
+  uploadQueue.splice(idx, 1);
+  renderQueue();
+  toast(`🗑 Fila: ${item.name} removido`, "success");
 }
 
 let geminiConfig = null;
@@ -1169,11 +1214,15 @@ async function processQueueItem(item) {
   renderQueue();
   
   try {
+    if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
+    
     // 1. Carregar chave e prompts
     const config = await loadGeminiConfig();
     if (!config || !config.key) {
       throw new Error("Chave do Gemini não configurada no servidor");
     }
+
+    if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
 
     // 2. Extrair Texto do arquivo via backend (rápido, <1s)
     const resExtract = await fetch(`/api/queue/extract/${encodeURIComponent(proj)}`, {
@@ -1183,6 +1232,8 @@ async function processQueueItem(item) {
     });
     const dataExtract = await resExtract.json();
     if (!dataExtract.ok) throw new Error(dataExtract.error || "Falha ao extrair texto");
+    
+    if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
     
     // 3. Reescrever com Gemini AI (Chamada direta no client, sem timeout Vercel)
     item.status_msg = "Reescrevendo no estilo Evolux...";
@@ -1200,6 +1251,8 @@ async function processQueueItem(item) {
       `CONTEÚDO BRUTO A SER REESCRITO:\n${dataExtract.text}`;
       
     let draftMarkdown = await callGeminiDirect(rewritePrompt);
+    
+    if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
     draftMarkdown = sanitizeMarkdown(draftMarkdown);
     
     // 4. Revisar com Gemini AI (Chamada direta no client, sem timeout Vercel)
@@ -1210,6 +1263,8 @@ async function processQueueItem(item) {
       `RASCUNHO A SER REVISADO:\n${draftMarkdown}`;
       
     let finalMarkdown = await callGeminiDirect(reviewPrompt);
+    
+    if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
     finalMarkdown = sanitizeMarkdown(finalMarkdown);
     
     // 5. Salvar no projeto e na nuvem
@@ -1236,8 +1291,27 @@ async function processQueueItem(item) {
   } catch (err) {
     console.error(err);
     item.status = "failed";
-    item.error = err.message || "Erro desconhecido";
-    toast(`❌ Falha: ${item.name}`, "error");
+    
+    const errMsg = err.message || String(err);
+    item.error = errMsg;
+    
+    if (errMsg !== "Cancelado pelo usuário") {
+      toast(`❌ Falha: ${item.name}`, "error");
+      
+      const lowerMsg = errMsg.toLowerCase();
+      const isQuotaError = lowerMsg.includes("quota") || 
+                           lowerMsg.includes("resource_exhausted") || 
+                           lowerMsg.includes("resourceexhausted") ||
+                           lowerMsg.includes("rate limit") || 
+                           lowerMsg.includes("429");
+                           
+      if (isQuotaError) {
+        shouldStopProcessing = true;
+        alert("⚠️ Limite da API do Gemini Atingido!\n\nO processamento da fila foi pausado automaticamente para poupar sua cota e evitar falhas consecutivas. Por favor, aguarde alguns instantes antes de processar novamente.");
+      }
+    } else {
+      toast(`🛑 Cancelado: ${item.name}`, "warning");
+    }
   }
   
   renderQueue();
@@ -1255,11 +1329,24 @@ async function processQueue() {
   }
   
   isProcessingQueue = true;
+  shouldStopProcessing = false;
+  
   const btn = document.getElementById("btnProcessQueue");
   btn.disabled = true;
   btn.innerHTML = '<span class="spinning">⏳</span> Processando...';
   
+  const btnStop = document.getElementById("btnStopQueue");
+  if (btnStop) {
+    btnStop.style.display = "inline-flex";
+    btnStop.disabled = false;
+    btnStop.innerHTML = "🛑 Parar";
+  }
+  
   for (let i = 0; i < uploadQueue.length; i++) {
+    if (shouldStopProcessing) {
+      toast("🛑 Processamento interrompido pelo usuário", "warning");
+      break;
+    }
     const item = uploadQueue[i];
     if (item.checked && (item.status === "pending" || item.status === "failed")) {
       await processQueueItem(item);
@@ -1269,10 +1356,12 @@ async function processQueue() {
   isProcessingQueue = false;
   btn.disabled = false;
   btn.textContent = "▶ Processar Selecionados";
+  if (btnStop) btnStop.style.display = "none";
 }
 
 async function reprocessQueueItem(idx) {
   if (isProcessingQueue) return;
+  shouldStopProcessing = false;
   const item = uploadQueue[idx];
   await processQueueItem(item);
 }
