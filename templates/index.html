@@ -859,6 +859,7 @@ async function addFilesToQueue(input) {
   // 2. Confirm direct uploads with backend
   if (filesToConfirm.length > 0) {
     try {
+      toast("Processando arquivos no servidor... Aguarde a extração para listar na fila.", "success");
       const confirmRes = await fetch(`/api/queue/confirm/${encodeURIComponent(proj)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -907,6 +908,7 @@ async function addFilesToQueue(input) {
       for (let fObj of filesToTraditionalUpload) fd.append("files", fObj);
       
       try {
+        toast("Processando arquivos no servidor... Aguarde a extração para listar na fila.", "success");
         const r = await fetch(`/api/queue/upload/${encodeURIComponent(proj)}`, {
           method: "POST",
           body: fd
