@@ -165,7 +165,7 @@ def load_prompt() -> str:
 def generate_content_with_retry(client, model, contents, max_retries=5, initial_backoff=2, config=None, pdf_path=None):
     """
     Executa client.models.generate_content com lógica de retentativa exponencial,
-    rotação de chaves/clientes de API (contas diferentes) e fallback automático para gemini-2.5-flash
+    rotação de chaves/clientes de API (contas diferentes) e fallback automático para gemini-1.5-flash
     se a cota do modelo pro for excedida em todas as chaves.
     Garante que o upload de arquivos PDF seja feito pelo mesmo cliente ativo na tentativa.
     """
@@ -238,9 +238,9 @@ def generate_content_with_retry(client, model, contents, max_retries=5, initial_
                 keys_tried_for_current_model += 1
                 if keys_tried_for_current_model >= keys_count:
                     # Todas as chaves retornaram cota esgotada para o modelo atual
-                    if current_model == "gemini-2.5-pro":
-                        print(f"🔄 Gemini API: Cota do PRO excedida em todas as {keys_count} chaves. Fazendo fallback para gemini-2.5-flash...")
-                        current_model = "gemini-2.5-flash"
+                    if current_model == "gemini-1.5-pro":
+                        print(f"🔄 Gemini API: Cota do PRO excedida em todas as {keys_count} chaves. Fazendo fallback para gemini-1.5-flash...")
+                        current_model = "gemini-1.5-flash"
                         keys_tried_for_current_model = 0
                         # Tenta imediatamente com o Flash na chave atual (sem dormir)
                         continue
@@ -294,7 +294,7 @@ def generate_md(topic: str, model: str = None) -> str:
     Retorna o texto markdown gerado pelo Gemini.
     """
     if model is None:
-        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
     base_prompt = load_prompt()
     full_prompt = f"{base_prompt}\n\nTEMA: {topic}"
 
@@ -312,7 +312,7 @@ def rewrite_content_to_style(raw_content: str, model: str = None) -> str:
     às diretrizes pedagógicas e técnicas descritas em prompt.md.
     """
     if model is None:
-        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
     base_prompt = load_prompt()
     full_prompt = (
         f"{base_prompt}\n\n"
@@ -341,7 +341,7 @@ def review_and_polish_markdown(draft_markdown: str, model: str = None) -> str:
     garante a coesão pedagógica, sanitiza as tags de imagem e caixas [BOX] e retorna o markdown lapidado.
     """
     if model is None:
-        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
     review_prompt = (
         "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
         "Sua missão é ler o rascunho de aula em Markdown abaixo e realizar uma revisão cirúrgica e rigorosa para deixá-lo impecável.\n\n"
@@ -378,7 +378,7 @@ def process_content_to_style(content_input: str, is_pdf: bool = False, model: st
     reescrevendo e polindo no padrão Evolux.
     """
     if model is None:
-        model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+        model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
 
     base_prompt = load_prompt()
     

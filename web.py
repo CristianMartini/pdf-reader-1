@@ -933,20 +933,37 @@ def _extract_text_from_pdf(filepath: str) -> str:
     import re
     from pypdf import PdfReader
     
-    print(f"📄 Extraindo texto de PDF de forma otimizada (sem imagens/cabeçalhos/rodapés): {filepath}")
+    print(f"📄 Extraindo texto de PDF de forma otimizada com coordenadas e repetições: {filepath}")
     reader = PdfReader(filepath)
     
     pages_lines = []
     header_footer_candidates = {}
     
     for page in reader.pages:
-        t = page.extract_text()
-        if t:
-            # Divide e remove espaços em branco das linhas
+        mb = page.mediabox
+        height = mb.top - mb.bottom
+        
+        page_texts = []
+        
+        def visitor(text, cm, tm, font_dict, font_size):
+            y_abs = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
+            pct_y = y_abs / height if height > 0 else 0.5
+            
+            # Margem superior (8% do topo): pct_y > 0.92
+            # Margem inferior (8% da base): pct_y < 0.08
+            is_margin = pct_y > 0.92 or pct_y < 0.08
+            
+            if not is_margin and text.strip():
+                page_texts.append(text)
+                
+        page.extract_text(visitor_text=visitor)
+        
+        if page_texts:
+            t = "".join(page_texts)
             lines = [line.strip() for line in t.splitlines()]
             pages_lines.append(lines)
             
-            # Coleta candidatos a cabeçalho/rodapé (primeiras 2 e últimas 2 linhas)
+            # Coleta candidatos a cabeçalho/rodapé do corpo restante (primeiras 2 e últimas 2 linhas)
             candidates = []
             if len(lines) >= 1:
                 candidates.append(lines[0])
@@ -1007,23 +1024,48 @@ def api_queue_upload(project):
             filepath = os.path.join(project_queue_dir, safe_name)
             f.save(filepath)
             
-            # Se o Firebase estiver ativo, salvar uma cópia temporária na nuvem.
-            # Isso é crucial no Vercel (serverless) onde instâncias são efêmeras
-            # e a fila de processamento pode cair em outro container sem o arquivo local.
-            if b:
-                try:
-                    blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
-                    blob = b.blob(blob_path)
-                    blob.upload_from_filename(filepath)
-                    print(f"📤 Firebase: Backup temporário concluído para {blob_path}")
-                except Exception as ex:
-                    print(f"⚠️ Firebase: Falha no backup temporário: {ex}")
+            ext = os.path.splitext(safe_name)[1].lower()
             
-            ext = os.path.splitext(safe_name)[1].lower().replace(".", "")
+            if ext == ".pdf":
+                # Extrai texto imediatamente no upload
+                try:
+                    raw_text = _extract_text_from_pdf(filepath)
+                    txt_filepath = filepath + ".txt"
+                    with open(txt_filepath, "w", encoding="utf-8") as txt_f:
+                        txt_f.write(raw_text)
+                    
+                    # Remove o PDF binário original localmente de imediato
+                    try:
+                        os.remove(filepath)
+                    except Exception:
+                        pass
+                        
+                    # Envia apenas o backup temporário de texto (.txt) para o Firebase
+                    if b:
+                        try:
+                            blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}.txt"
+                            blob = b.blob(blob_path)
+                            blob.upload_from_filename(txt_filepath)
+                            print(f"📤 Firebase: Backup temporário de texto concluído para {blob_path}")
+                        except Exception as ex:
+                            print(f"⚠️ Firebase: Falha no backup temporário: {ex}")
+                except Exception as ex:
+                    print(f"❌ Erro na extração imediata do PDF: {ex}")
+            else:
+                # Arquivos MD ou TXT normais
+                if b:
+                    try:
+                        blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                        blob = b.blob(blob_path)
+                        blob.upload_from_filename(filepath)
+                        print(f"📤 Firebase: Backup temporário concluído para {blob_path}")
+                    except Exception as ex:
+                        print(f"⚠️ Firebase: Falha no backup temporário: {ex}")
+            
             uploaded_files.append({
                 "name": f.filename,
                 "safe_name": safe_name,
-                "type": ext
+                "type": ext.replace(".", "")
             })
             
     return jsonify(ok=True, files=uploaded_files)
@@ -1054,8 +1096,15 @@ def api_queue_confirm(project):
         if not safe_name:
             continue
             
+        is_pdf = safe_name.lower().endswith(".pdf") or ext.lower() == "pdf"
+        
         blob_path = f"temp_queue/{safe_proj}/{safe_name}"
+        if is_pdf:
+            blob_path += ".txt"
+            
         filepath = os.path.join(project_queue_dir, safe_name)
+        if is_pdf:
+            filepath += ".txt"
         
         try:
             blob = b.blob(blob_path)
@@ -1081,13 +1130,20 @@ def api_queue_extract(project):
     if not safe_name:
         return jsonify(ok=False, error="Nome de arquivo inválido")
         
+    ext = os.path.splitext(safe_name)[1].lower()
+    is_pdf = ext == ".pdf"
+    
     project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
     filepath = os.path.join(project_queue_dir, safe_name)
-    
+    if is_pdf:
+        filepath += ".txt"
+        
     b = get_bucket()
     if not os.path.isfile(filepath) and b:
         try:
             blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+            if is_pdf:
+                blob_path += ".txt"
             blob = b.blob(blob_path)
             if blob.exists():
                 os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -1100,35 +1156,11 @@ def api_queue_extract(project):
         return jsonify(ok=False, error="Arquivo temporário não encontrado no servidor")
         
     try:
-        ext = os.path.splitext(safe_name)[1].lower()
-        if ext == ".pdf":
-            raw_text = _extract_text_from_pdf(filepath)
-            if not raw_text.strip():
-                return jsonify(ok=False, error="O PDF parece estar vazio ou é uma imagem escaneada sem texto.")
-            
-            # Salva rascunho de texto limpo no Firebase para persistência / auditoria
-            if b:
-                try:
-                    txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
-                    local_txt_path = filepath + ".txt"
-                    with open(local_txt_path, "w", encoding="utf-8") as f:
-                        f.write(raw_text)
-                    
-                    blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
-                    blob_txt = b.blob(blob_txt_path)
-                    blob_txt.upload_from_filename(local_txt_path)
-                    print(f"📤 Firebase: Backup de texto limpo enviado para {blob_txt_path}")
-                    
-                    # Remove local txt temp copy
-                    try:
-                        os.remove(local_txt_path)
-                    except Exception:
-                        pass
-                except Exception as ex:
-                    print(f"⚠️ Firebase: Erro ao fazer upload de backup de texto: {ex}")
-        elif ext in (".md", ".txt"):
+        if is_pdf or ext in (".md", ".txt"):
             with open(filepath, "r", encoding="utf-8") as f:
                 raw_text = f.read()
+            if is_pdf and not raw_text.strip():
+                return jsonify(ok=False, error="O PDF parece estar vazio ou é uma imagem escaneada sem texto.")
         else:
             return jsonify(ok=False, error=f"Extensão de arquivo não suportada: {ext}")
             
@@ -1136,6 +1168,7 @@ def api_queue_extract(project):
     except Exception as e:
         traceback.print_exc()
         return jsonify(ok=False, error=str(e))
+
 
 
 @app.route("/api/config/gemini", methods=["GET"])
@@ -1175,7 +1208,7 @@ def api_config_gemini():
         "8. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
     )
     
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+    model = os.environ.get("GEMINI_MODEL", "gemini-1.5-pro")
     return jsonify(
         ok=True,
         key=key,
@@ -1236,6 +1269,7 @@ def api_debug_firebase():
 
 @app.route("/api/queue/save/<project>", methods=["POST"])
 def api_queue_save(project):
+
     data = request.json or {}
     safe_name = secure_filename(data.get("filename", ""))
     content = data.get("content", "")
@@ -1257,7 +1291,11 @@ def api_queue_save(project):
         
         # Limpar arquivo temporário local e no Firebase Storage
         project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+        is_pdf = safe_name.lower().endswith(".pdf")
         filepath = os.path.join(project_queue_dir, safe_name)
+        if is_pdf:
+            filepath += ".txt"
+            
         try:
             if os.path.isfile(filepath):
                 os.remove(filepath)
@@ -1268,6 +1306,8 @@ def api_queue_save(project):
         if b:
             try:
                 blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                if is_pdf:
+                    blob_path += ".txt"
                 blob = b.blob(blob_path)
                 if blob.exists():
                     blob.delete()
@@ -1292,7 +1332,11 @@ def api_queue_delete(project):
     try:
         # 1. Limpar arquivo temporário local
         project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+        is_pdf = safe_name.lower().endswith(".pdf")
         filepath = os.path.join(project_queue_dir, safe_name)
+        if is_pdf:
+            filepath += ".txt"
+            
         try:
             if os.path.isfile(filepath):
                 os.remove(filepath)
@@ -1304,18 +1348,12 @@ def api_queue_delete(project):
         if b:
             try:
                 blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                if is_pdf:
+                    blob_path += ".txt"
                 blob = b.blob(blob_path)
                 if blob.exists():
                     blob.delete()
                     print(f"🗑️ Firebase: Backup temporário deletado: {blob_path}")
-                
-                # Também tenta deletar o backup .txt se existir
-                txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
-                blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
-                blob_txt = b.blob(blob_txt_path)
-                if blob_txt.exists():
-                    blob_txt.delete()
-                    print(f"🗑️ Firebase: Backup de texto deletado: {blob_txt_path}")
             except Exception as ex:
                 print(f"⚠️ Firebase: Erro ao deletar backups: {ex}")
                 
@@ -1334,8 +1372,13 @@ def api_queue_process(project):
         return jsonify(ok=False, error="Nome de arquivo inválido")
         
     project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
-    filepath = os.path.join(project_queue_dir, safe_name)
+    ext = os.path.splitext(safe_name)[1].lower()
+    is_pdf = ext == ".pdf"
     
+    filepath = os.path.join(project_queue_dir, safe_name)
+    if is_pdf:
+        filepath += ".txt"
+        
     b = get_bucket()
     
     # Se o arquivo não estiver localmente (ex: container reiniciou/trocou no Vercel),
@@ -1344,6 +1387,8 @@ def api_queue_process(project):
         if b:
             try:
                 blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                if is_pdf:
+                    blob_path += ".txt"
                 blob = b.blob(blob_path)
                 if blob.exists():
                     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -1359,16 +1404,10 @@ def api_queue_process(project):
         # 1. Envio para a IA Gemini (Geração + Revisão unificada e upload nativo)
         from ai.gemini_client import process_content_to_style
         
-        ext = os.path.splitext(safe_name)[1].lower()
-        if ext == ".pdf":
-            raw_text = _extract_text_from_pdf(filepath)
-            rewritten_markdown = process_content_to_style(raw_text, is_pdf=False)
-        elif ext in (".md", ".txt"):
-            with open(filepath, "r", encoding="utf-8") as f:
-                raw_text = f.read()
-            rewritten_markdown = process_content_to_style(raw_text, is_pdf=False)
-        else:
-            return jsonify(ok=False, error=f"Extensão de arquivo não suportada: {ext}")
+        with open(filepath, "r", encoding="utf-8") as f:
+            raw_text = f.read()
+            
+        rewritten_markdown = process_content_to_style(raw_text, is_pdf=False)
         
         # 3. Salvar como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"
@@ -1390,18 +1429,12 @@ def api_queue_process(project):
         if b:
             try:
                 blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                if is_pdf:
+                    blob_path += ".txt"
                 blob = b.blob(blob_path)
                 if blob.exists():
                     blob.delete()
                     print(f"🗑️ Firebase: Backup temporário removido de {blob_path}")
-                
-                # Remove o backup .txt temporário se existir
-                txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
-                blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
-                blob_txt = b.blob(blob_txt_path)
-                if blob_txt.exists():
-                    blob_txt.delete()
-                    print(f"🗑️ Firebase: Backup de texto temporário removido de {blob_txt_path}")
             except Exception:
                 pass
             
@@ -1413,18 +1446,15 @@ def api_queue_process(project):
         if b:
             try:
                 blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                if is_pdf:
+                    blob_path += ".txt"
                 blob = b.blob(blob_path)
                 if blob.exists():
                     blob.delete()
-                
-                txt_safe_name = os.path.splitext(safe_name)[0] + ".txt"
-                blob_txt_path = f"temp_queue/{secure_filename(project)}/{txt_safe_name}"
-                blob_txt = b.blob(blob_txt_path)
-                if blob_txt.exists():
-                    blob_txt.delete()
             except Exception:
                 pass
         return jsonify(ok=False, error=str(e))
+
 
 
 @app.route("/api/projects/<project>/download-mds")

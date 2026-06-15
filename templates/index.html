@@ -1069,7 +1069,7 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   const keys = config.keys && config.keys.length > 0 ? config.keys : [config.key];
   const keysCount = keys.length;
   
-  const baseModel = config.model || "gemini-2.5-pro";
+  const baseModel = config.model || "gemini-1.5-pro";
   let currentModel = baseModel;
   
   let keysTriedForCurrentModel = 0;
@@ -1131,9 +1131,9 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
         keysTriedForCurrentModel++;
         if (keysTriedForCurrentModel >= keysCount) {
           // Já tentou todas as chaves com esse modelo
-          if (currentModel === "gemini-2.5-pro") {
-            console.warn(`🔄 Cota do PRO excedida em todas as chaves (${keysCount}). Fazendo fallback para gemini-2.5-flash...`);
-            currentModel = "gemini-2.5-flash";
+          if (currentModel === "gemini-1.5-pro") {
+            console.warn(`🔄 Cota do PRO excedida em todas as chaves (${keysCount}). Fazendo fallback para gemini-1.5-flash...`);
+            currentModel = "gemini-1.5-flash";
             keysTriedForCurrentModel = 0;
             // Tenta imediatamente com o Flash, sem dormir
             continue;
@@ -1235,39 +1235,25 @@ async function processQueueItem(item) {
     
     if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
     
-    // 3. Reescrever com Gemini AI (Chamada direta no client, sem timeout Vercel)
-    item.status_msg = "Reescrevendo no estilo Evolux...";
+    // 3. Processar com Gemini AI (Passo Único Inteligente)
+    item.status_msg = "Processando com Gemini (Passo Único)...";
     renderQueue();
     
-    const rewritePrompt = `${config.base_prompt}\n\n` +
-      "INSTRUÇÃO ADICIONAL: Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado acima. " +
-      "Preserve o conteúdo didático e técnico, mas estruture com cabeçalho YAML apropriado (titulo, aula e materia), " +
-      "títulos (#, ##, ###, ####), parágrafos separados por uma linha em branco, listas com traços, e adicione pelo menos " +
-      "um bloco [BOX] para fixação de conteúdo importante. Insira tags de imagem sugestivas baseadas no contexto. " +
-      "As tags de imagem devem usar obrigatoriamente a sintaxe `[IMG:nome_especifico.png] (Descrição detalhada em parênteses na mesma linha sugerindo a imagem/diagrama)` " +
-      "em sua própria linha isolada (ex: `[IMG:lesao_defesa.png] (Fotografia de lesão típica no antebraço ou diagrama anatômico)`). " +
-      "NUNCA gere qualquer legenda em itálico ou texto descritivo nas linhas abaixo ou acima das tags [IMG:...]. " +
+    const singlePassPrompt = `${config.base_prompt}\n\n` +
+      "Você também atuará como o Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n" +
+      "Sua missão é gerar o conteúdo em Markdown impecável, formatado e revisado de primeira, seguindo regras rígidas de saída:\n\n" +
+      `${config.review_instructions}\n\n` +
+      "INSTRUÇÃO DE GERAÇÃO:\n" +
+      "Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado, aplicando diretamente todas as diretrizes de revisão e formatação em um único passo. " +
       "Importante: Sua resposta deve começar diretamente com '---' sem qualquer mensagem introdutória ou saudação.\n\n" +
-      `CONTEÚDO BRUTO A SER REESCRITO:\n${dataExtract.text}`;
+      `CONTEÚDO BRUTO A SER PROCESSADO:\n${dataExtract.text}`;
       
-    let draftMarkdown = await callGeminiDirect(rewritePrompt);
-    
-    if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
-    draftMarkdown = sanitizeMarkdown(draftMarkdown);
-    
-    // 4. Revisar com Gemini AI (Chamada direta no client, sem timeout Vercel)
-    item.status_msg = "Revisando conteúdo (Agente Revisor)...";
-    renderQueue();
-    
-    const reviewPrompt = `${config.review_instructions}\n\n` +
-      `RASCUNHO A SER REVISADO:\n${draftMarkdown}`;
-      
-    let finalMarkdown = await callGeminiDirect(reviewPrompt);
+    let finalMarkdown = await callGeminiDirect(singlePassPrompt);
     
     if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
     finalMarkdown = sanitizeMarkdown(finalMarkdown);
     
-    // 5. Salvar no projeto e na nuvem
+    // 4. Salvar no projeto e na nuvem
     item.status_msg = "Salvando e sincronizando na nuvem...";
     renderQueue();
     
