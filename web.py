@@ -1447,7 +1447,7 @@ def api_queue_process(project):
         with open(filepath, "r", encoding="utf-8") as f:
             raw_text = f.read()
             
-        rewritten_markdown = process_content_to_style(raw_text, is_pdf=False)
+        rewritten_markdown = process_content_to_style(raw_text, is_pdf=False, filename=safe_name)
         
         # 3. Salvar como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"

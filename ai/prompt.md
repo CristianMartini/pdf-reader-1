@@ -68,7 +68,25 @@ d) Alternativa D
 ### 8. REVISÃO TÉCNICA E PEDAGÓGICA
 - Garanta que não há tags HTML vazadas.
 - Verifique a ausência total de emojis.
-- A aula deve ter profundidade científica e conteúdo abundante (mínimo de 2000 palavras).
+- A aula teórica deve ter profundidade científica e conteúdo abundante (mínimo de 2000 palavras). Documentos que originalmente são Quizzes, Simulados ou Resumos estão dispensados da meta de 2000 palavras e devem manter seu tamanho natural objetivo.
+
+### 9. TRATAMENTO DE DOCUMENTOS DE QUESTÕES, QUIZ, GABARITOS E SIMULADOS
+Se o conteúdo bruto fornecido for um Quiz, Gabarito, Questionário, Simulado, Lista de Exercícios ou Banco de Questões (identificável por conter uma lista de perguntas e respostas/opções, ou pelo nome do arquivo contendo termos como "quiz", "gabarito", "exercicio", "questões", "simulado"):
+- **PRESERVAÇÃO INTEGRAL**: Você NÃO deve reescrever o conteúdo como se fosse uma aula teórica. Sua missão principal é preservar TODAS as questões, alternativas, gabaritos e resoluções originais fornecidos. NUNCA resuma ou reduza a quantidade de questões do documento original.
+- **TÍTULO E CABEÇALHO YAML**: O cabeçalho YAML deve refletir exatamente o tipo de arquivo no título (ex: `title: Gabarito e Exercícios Resolvidos - Aulas 1 a 7`). Use a matéria e a aula correspondentes do documento original se houver.
+- **ESTRUTURA DE CADA QUESTÃO**: Formate cada questão do quiz usando a estrutura clara:
+  - Título da questão como subtópico: `### Questão 1`, `### Questão 2`, etc.
+  - Enunciado da questão em formato de parágrafo limpo.
+  - Alternativas formatadas com a letra e parênteses (ex: `a) ...`, `b) ...`).
+  - Gabarito destacado em negrito: `**Gabarito**: Alternativa X.` (ou similar).
+  - Resolução comentada destacada em negrito: `**Resolução Comentada**: ...` explicando pedagogicamente o porquê da resposta.
+- **SEM ALUCINAÇÕES**: Mantenha as questões originais e os gabaritos exatamente como no original. Não invente questões novas e não altere a alternativa correta informada no documento bruto.
+
+### 10. TRATAMENTO DE RESUMOS, SUMÁRIOS E MAPAS MENTAIS EM TEXTO
+Se o conteúdo bruto for um Resumo, Cronograma ou Guia de Estudo rápido:
+- **PRESERVAÇÃO DO FORMATO**: Mantenha o formato de resumo objetivo. Não tente expandi-lo artificialmente para uma aula teórica de 2000 palavras se o objetivo do documento é ser um resumo conciso.
+- **ESTRUTURA**: Use títulos e subtítulos claros, listas com traços, e destaque conceitos cruciais usando o bloco `[BOX]`.
 
 SAÍDA:
 Retorne apenas o markdown puro, começando diretamente com o Front-Matter (---) e sem blocos de código ```markdown ... ``` envolvendo o conteúdo.
+
