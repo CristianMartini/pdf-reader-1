@@ -372,7 +372,7 @@ def review_and_polish_markdown(draft_markdown: str, model: str = None) -> str:
     return sanitize_markdown(response.text)
 
 
-def process_content_to_style(content_input: str, is_pdf: bool = False, model: str = None) -> str:
+def process_content_to_style(content_input: str, is_pdf: bool = False, model: str = None, filename: str = None) -> str:
     """
     Processa o conteúdo (bruto ou PDF) em um único passo otimizado,
     reescrevendo e polindo no padrão Evolux.
@@ -382,11 +382,65 @@ def process_content_to_style(content_input: str, is_pdf: bool = False, model: st
 
     base_prompt = load_prompt()
     
+    # Detecção dinâmica de Quiz, Gabarito, Simulado ou Resumos
+    name_lower = filename.lower() if filename else ""
+    text_lower = content_input.lower()[:3000] if content_input else ""
+    
+    doc_type_instruction = ""
+    
+    is_quiz = (
+        "quiz" in name_lower or 
+        "gabarito" in name_lower or 
+        "exercicio" in name_lower or 
+        "questo" in name_lower or 
+        "simulado" in name_lower or 
+        "prova" in name_lower or 
+        "teste" in name_lower or
+        "gabarito" in text_lower or
+        "questão 1" in text_lower or
+        "questão 01" in text_lower or
+        "alternativa correta" in text_lower or
+        "resolução comentada" in text_lower
+    )
+    
+    is_summary = (
+        "resumo" in name_lower or
+        "sumario" in name_lower or
+        "cronograma" in name_lower or
+        "guia" in name_lower or
+        "resumo de" in text_lower or
+        "cronograma" in text_lower
+    )
+    
+    if is_quiz:
+        print("ℹ️ Gemini Client: Detectado tipo de arquivo utilitário: QUIZ / GABARITO / EXERCÍCIOS")
+        doc_type_instruction = (
+            "\n⚠️ INSTRUÇÃO CRÍTICA DE PRESERVAÇÃO DE QUIZ/GABARITO:\n"
+            "- O documento bruto fornecido é um QUIZ, SIMULADO, LISTA DE EXERCÍCIOS ou GABARITO.\n"
+            "- Você NÃO deve transformá-lo em uma aula teórica explicativa longa!\n"
+            "- Você DEVE PRESERVAR INTEGRALMENTE todas as questões, alternativas, gabaritos e respostas contidas no original.\n"
+            "- Não exclua nenhuma questão, não resuma a lista de exercícios e não alucine novos assuntos.\n"
+            "- Formate cada questão com um subtítulo como '### Questão X', seguido do enunciado, das alternativas em linhas separadas (a, b, c, d, e), o gabarito em negrito ('**Gabarito**: Alternativa X') e a resolução comentada explicativa ('**Resolução Comentada**: ...').\n"
+            "- Se o arquivo for apenas um Gabarito (tabela/lista de respostas), mantenha a correspondência exata das respostas e formate-o no padrão Evolux.\n"
+            "- Comece diretamente com '---' e configure o cabeçalho YAML para descrever o Quiz/Gabarito (ex: 'title: Simulado e Gabarito de Exercícios' ou 'title: Gabarito - Aulas 1 a 7').\n\n"
+        )
+    elif is_summary:
+        print("ℹ️ Gemini Client: Detectado tipo de arquivo utilitário: RESUMO / GUIA / CRONOGRAMA")
+        doc_type_instruction = (
+            "\n⚠️ INSTRUÇÃO CRÍTICA DE PRESERVAÇÃO DE RESUMO/GUIA:\n"
+            "- O documento bruto fornecido é um RESUMO, CRONOGRAMA ou GUIA DE ESTUDOS.\n"
+            "- Não tente expandir este documento artificialmente para 2000 palavras nem criar uma aula teórica longa.\n"
+            "- Preserve o formato conciso, objetivo e esquematizado do resumo original.\n"
+            "- Estruture com títulos e subtítulos claros, listas com traços e blocos '[BOX]' para conceitos fundamentais.\n"
+            "- Comece diretamente com '---' no cabeçalho YAML.\n\n"
+        )
+    
     # Adicionamos diretrizes de revisão e sanitização no prompt do sistema
     system_instruction = (
         f"{base_prompt}\n\n"
         "Você é um Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n"
         "Sua missão é gerar o conteúdo em Markdown impecável, formatado e revisado de primeira, seguindo regras rígidas de saída:\n\n"
+        f"{doc_type_instruction}"
         "REGRA ABSOLUTA DE SAÍDA:\n"
         "- Sua resposta deve conter EXCLUSIVAMENTE o texto Markdown revisado, começando diretamente com o bloco YAML (---) do cabeçalho.\n"
         "- NUNCA inclua preâmbulos, explicações, comentários sobre a revisão, ou qualquer texto introdutório antes do conteúdo.\n"

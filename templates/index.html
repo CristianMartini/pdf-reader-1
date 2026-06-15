@@ -1241,11 +1241,62 @@ async function processQueueItem(item) {
     item.status_msg = "Processando com Gemini (Passo Único)...";
     renderQueue();
     
+    // Detecção dinâmica de Quiz, Gabarito, Simulado ou Resumos
+    const nameLower = (item.name || "").toLowerCase();
+    const textLower = (dataExtract.text || "").toLowerCase().slice(0, 3000);
+    
+    let docTypeInstruction = "";
+    
+    const isQuiz = 
+      nameLower.includes("quiz") || 
+      nameLower.includes("gabarito") || 
+      nameLower.includes("exercicio") || 
+      nameLower.includes("questo") || 
+      nameLower.includes("simulado") || 
+      nameLower.includes("prova") || 
+      nameLower.includes("teste") ||
+      textLower.includes("gabarito") ||
+      textLower.includes("questão 1") ||
+      textLower.includes("questão 01") ||
+      textLower.includes("alternativa correta") ||
+      textLower.includes("resolução comentada");
+      
+    const isSummary =
+      nameLower.includes("resumo") ||
+      nameLower.includes("sumario") ||
+      nameLower.includes("cronograma") ||
+      nameLower.includes("guia") ||
+      textLower.includes("resumo de") ||
+      textLower.includes("cronograma");
+      
+    if (isQuiz) {
+      console.log("ℹ️ Detectado tipo de arquivo: QUIZ / GABARITO / EXERCÍCIOS");
+      docTypeInstruction = 
+        "\n⚠️ INSTRUÇÃO CRÍTICA DE PRESERVAÇÃO DE QUIZ/GABARITO:\n" +
+        "- O documento bruto fornecido é um QUIZ, SIMULADO, LISTA DE EXERCÍCIOS ou GABARITO.\n" +
+        "- Você NÃO deve transformá-lo em uma aula teórica explicativa longa!\n" +
+        "- Você DEVE PRESERVAR INTEGRALMENTE todas as questões, alternativas, gabaritos e respostas contidas no original.\n" +
+        "- Não exclua nenhuma questão, não resuma a lista de exercícios e não alucine novos assuntos.\n" +
+        "- Formate cada questão com um subtítulo como '### Questão X', seguido do enunciado, das alternativas em linhas separadas (a, b, c, d, e), o gabarito em negrito ('**Gabarito**: Alternativa X') e a resolução comentada explicativa ('**Resolução Comentada**: ...').\n" +
+        "- Se o arquivo for apenas um Gabarito (tabela/lista de respostas), mantenha a correspondência exata das respostas e formate-o no padrão Evolux.\n" +
+        "- Comece diretamente com '---' e configure o cabeçalho YAML para descrever o Quiz/Gabarito (ex: 'title: Simulado e Gabarito de Exercícios' ou 'title: Gabarito - Aulas 1 a 7').\n\n";
+    } else if (isSummary) {
+      console.log("ℹ️ Detectado tipo de arquivo: RESUMO / GUIA / CRONOGRAMA");
+      docTypeInstruction = 
+        "\n⚠️ INSTRUÇÃO CRÍTICA DE PRESERVAÇÃO DE RESUMO/GUIA:\n" +
+        "- O documento bruto fornecido é um RESUMO, CRONOGRAMA ou GUIA DE ESTUDOS.\n" +
+        "- Não tente expandir este documento artificialmente para 2000 palavras nem criar uma aula teórica longa.\n" +
+        "- Preserve o formato conciso, objetivo e esquematizado do resumo original.\n" +
+        "- Estruture com títulos e subtítulos claros, listas com traços e blocos '[BOX]' para conceitos fundamentais.\n" +
+        "- Comece diretamente com '---' no cabeçalho YAML.\n\n";
+    }
+    
     const singlePassPrompt = `${config.base_prompt}\n\n` +
       "Você também atuará como o Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n" +
       "Sua missão é gerar o conteúdo em Markdown impecável, formatado e revisado de primeira, seguindo regras rígidas de saída:\n\n" +
       `${config.review_instructions}\n\n` +
       "INSTRUÇÃO DE GERAÇÃO:\n" +
+      docTypeInstruction +
       "Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado, aplicando diretamente todas as diretrizes de revisão e formatação em um único passo. " +
       "Importante: Sua resposta deve começar diretamente com '---' sem qualquer mensagem introdutória ou saudação.\n\n" +
       `CONTEÚDO BRUTO A SER PROCESSADO:\n${dataExtract.text}`;
