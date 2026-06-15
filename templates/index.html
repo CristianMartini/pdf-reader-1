@@ -1069,7 +1069,7 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   const keys = config.keys && config.keys.length > 0 ? config.keys : [config.key];
   const keysCount = keys.length;
   
-  const baseModel = config.model || "gemini-1.5-pro";
+  const baseModel = config.model || "gemini-2.5-pro";
   let currentModel = baseModel;
   
   let keysTriedForCurrentModel = 0;
@@ -1131,9 +1131,9 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
         keysTriedForCurrentModel++;
         if (keysTriedForCurrentModel >= keysCount) {
           // Já tentou todas as chaves com esse modelo
-          if (currentModel === "gemini-1.5-pro") {
-            console.warn(`🔄 Cota do PRO excedida em todas as chaves (${keysCount}). Fazendo fallback para gemini-1.5-flash...`);
-            currentModel = "gemini-1.5-flash";
+          if (currentModel === "gemini-2.5-pro") {
+            console.warn(`🔄 Cota do PRO excedida em todas as chaves (${keysCount}). Fazendo fallback para gemini-2.5-flash...`);
+            currentModel = "gemini-2.5-flash";
             keysTriedForCurrentModel = 0;
             // Tenta imediatamente com o Flash, sem dormir
             continue;
