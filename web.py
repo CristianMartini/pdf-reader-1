@@ -1098,28 +1098,68 @@ def api_queue_confirm(project):
             
         is_pdf = safe_name.lower().endswith(".pdf") or ext.lower() == "pdf"
         
-        blob_path = f"temp_queue/{safe_proj}/{safe_name}"
         if is_pdf:
-            blob_path += ".txt"
+            # O navegador fez upload direto do PDF binário para f"temp_queue/{safe_proj}/{safe_name}"
+            pdf_blob_path = f"temp_queue/{safe_proj}/{safe_name}"
+            pdf_filepath = os.path.join(project_queue_dir, safe_name)
+            txt_filepath = pdf_filepath + ".txt"
             
-        filepath = os.path.join(project_queue_dir, safe_name)
-        if is_pdf:
-            filepath += ".txt"
-        
-        try:
-            blob = b.blob(blob_path)
-            if blob.exists():
-                blob.download_to_filename(filepath)
-                print(f"📥 Firebase: Download pós-upload temporário concluído para {filepath}")
-                confirmed_files.append({
-                    "name": name,
-                    "safe_name": safe_name,
-                    "type": ext
-                })
-        except Exception as e:
-            print(f"❌ Firebase: Erro ao baixar arquivo da fila {safe_name}: {e}")
-            
+            try:
+                pdf_blob = b.blob(pdf_blob_path)
+                if pdf_blob.exists():
+                    # 1. Download do PDF binário temporário do Firebase
+                    pdf_blob.download_to_filename(pdf_filepath)
+                    
+                    # 2. Extração de texto imediata localmente
+                    raw_text = _extract_text_from_pdf(pdf_filepath)
+                    with open(txt_filepath, "w", encoding="utf-8") as txt_f:
+                        txt_f.write(raw_text)
+                    
+                    # 3. Envia o backup de texto para o Firebase
+                    txt_blob_path = pdf_blob_path + ".txt"
+                    txt_blob = b.blob(txt_blob_path)
+                    txt_blob.upload_from_filename(txt_filepath)
+                    print(f"📤 Firebase: Backup temporário de texto concluído para {txt_blob_path}")
+                    
+                    # 4. Deleta o PDF binário no Firebase
+                    try:
+                        pdf_blob.delete()
+                        print(f"🗑️ Firebase: PDF binário deletado do storage: {pdf_blob_path}")
+                    except Exception as ex:
+                        print(f"⚠️ Firebase: Falha ao deletar PDF binário do storage: {ex}")
+                        
+                    # 5. Deleta o PDF binário localmente
+                    try:
+                        os.remove(pdf_filepath)
+                    except Exception:
+                        pass
+                        
+                    confirmed_files.append({
+                        "name": name,
+                        "safe_name": safe_name,
+                        "type": ext
+                    })
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao confirmar e converter PDF {safe_name}: {e}")
+        else:
+            # Arquivos comuns (.md, .txt)
+            blob_path = f"temp_queue/{safe_proj}/{safe_name}"
+            filepath = os.path.join(project_queue_dir, safe_name)
+            try:
+                blob = b.blob(blob_path)
+                if blob.exists():
+                    blob.download_to_filename(filepath)
+                    print(f"📥 Firebase: Download pós-upload temporário concluído para {filepath}")
+                    confirmed_files.append({
+                        "name": name,
+                        "safe_name": safe_name,
+                        "type": ext
+                    })
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao baixar arquivo da fila {safe_name}: {e}")
+                
     return jsonify(ok=True, files=confirmed_files)
+
 
 
 @app.route("/api/queue/extract/<project>", methods=["POST"])
