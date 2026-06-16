@@ -321,9 +321,9 @@ def _sync_project_from_firebase(project_name: str, force: bool = False):
             
             rel_path = os.path.relpath(blob.name, f"projects/{project_name}")
             
-            # ATENÇÃO: Sincroniza localmente apenas markdowns e .keep.
+            # ATENÇÃO: Sincroniza localmente apenas markdowns, .keep e project_info.json.
             # Imagens e PDFs são armazenados na nuvem e baixados sob demanda.
-            if not (rel_path.endswith(".md") or rel_path == ".keep"):
+            if not (rel_path.endswith(".md") or rel_path == ".keep" or rel_path == "project_info.json"):
                 continue
                 
             local_file_path = os.path.join(local_proj_dir, rel_path)
@@ -1447,7 +1447,9 @@ def api_queue_process(project):
         with open(filepath, "r", encoding="utf-8") as f:
             raw_text = f.read()
             
-        rewritten_markdown = process_content_to_style(raw_text, is_pdf=False, filename=safe_name)
+        materia = _get_project_materia(project)
+        rewritten_markdown = process_content_to_style(raw_text, is_pdf=False, filename=safe_name, materia=materia)
+        rewritten_markdown = override_materia_in_markdown(rewritten_markdown, materia)
         
         # 3. Salvar como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"
@@ -1566,6 +1568,202 @@ def api_download_project_pdfs(project):
         as_attachment=True,
         download_name=f"{safe_proj}_pdfs.zip"
     )
+
+
+# ════════════════════════════════════════
+# PADRONIZAÇÃO DE MATÉRIA
+# ════════════════════════════════════════
+def _project_info_path(project):
+    return os.path.join(_pdir(project), "project_info.json")
+
+def _get_project_materia(project):
+    # Força a sincronização antes de ler a matéria (importante para ambientes como Vercel)
+    _sync_project_from_firebase(project)
+    
+    info_path = _project_info_path(project)
+    if os.path.isfile(info_path):
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                m = data.get("materia", "").strip()
+                if m:
+                    return m
+        except Exception:
+            pass
+            
+    # Fallback 1: Verifica nos markdowns existentes
+    pd = _pdir(project)
+    md_files = glob.glob(os.path.join(pd, "*.md"))
+    md_files.sort(key=os.path.getmtime, reverse=True)
+    
+    from engine.template import extract_meta
+    for md_path in md_files:
+        try:
+            meta = extract_meta(md_path)
+            m = meta.get("materia", "").strip()
+            if m and m.lower() != "disciplina":
+                _save_project_info(project, {"materia": m})
+                return m
+        except Exception:
+            pass
+            
+    # Fallback 2: Adivinha a partir do nome do projeto
+    guessed = project.replace("_", " ").replace("-", " ").strip()
+    guessed = " ".join(word.capitalize() for word in guessed.split())
+    _save_project_info(project, {"materia": guessed})
+    return guessed
+
+def _save_project_info(project, data):
+    info_path = _project_info_path(project)
+    existing = {}
+    if os.path.isfile(info_path):
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+    existing.update(data)
+    try:
+        os.makedirs(os.path.dirname(info_path), exist_ok=True)
+        with open(info_path, "w", encoding="utf-8") as f:
+            json.dump(existing, f, ensure_ascii=False, indent=2)
+        # Upload do project_info.json atualizado para o Firebase
+        _upload_file_to_firebase(project, "project_info.json", is_asset=False)
+    except Exception as e:
+        print(f"Erro ao salvar project_info.json: {e}")
+
+def _detect_project_materia_backend(project):
+    # 1. Busca primeiro nos MDs existentes
+    pd = _pdir(project)
+    md_files = glob.glob(os.path.join(pd, "*.md"))
+    md_files.sort(key=os.path.getmtime, reverse=True)
+    from engine.template import extract_meta
+    for md_path in md_files:
+        try:
+            meta = extract_meta(md_path)
+            m = meta.get("materia", "").strip()
+            if m and m.lower() != "disciplina":
+                return m
+        except Exception:
+            pass
+
+    # 2. Busca amostra de texto dos PDFs na fila temporária ou no diretório do projeto
+    queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    txt_files = glob.glob(os.path.join(queue_dir, "*.txt"))
+    txt_files += glob.glob(os.path.join(pd, "*.txt"))
+    
+    raw_text_sample = ""
+    for txt_path in txt_files:
+        try:
+            with open(txt_path, "r", encoding="utf-8") as f:
+                sample = f.read(5000)
+                if sample.strip():
+                    raw_text_sample = sample
+                    break
+        except Exception:
+            pass
+            
+    # 3. Usa IA Gemini para classificar com base na amostra de texto do PDF
+    if raw_text_sample:
+        try:
+            from ai.gemini_client import get_client, generate_content_with_retry
+            client = get_client()
+            model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+            prompt = (
+                "Você é um classificador acadêmico de elite. Por favor, leia a amostra de texto abaixo extraída de um material didático "
+                "e identifique qual é a disciplina, matéria ou assunto principal do curso/aula (ex: Balística, Criminologia, Direito Penal, "
+                "Medicina Legal, Direito Constitucional, etc.).\n"
+                "REGRA ABSOLUTA: Retorne APENAS o nome da disciplina com as primeiras letras maiúsculas, em no máximo 3 ou 4 palavras, sem preâmbulos, explicações ou comentários.\n\n"
+                f"AMOSTRA DE TEXTO:\n{raw_text_sample}"
+            )
+            response = generate_content_with_retry(
+                client=client,
+                model=model,
+                contents=prompt
+            )
+            detected = response.text.strip().replace("\n", " ").replace("*", "").replace('"', '').replace("'", "")
+            if detected and len(detected) < 60:
+                return detected
+        except Exception as e:
+            print(f"Erro ao usar Gemini para detecção de matéria: {e}")
+            
+    # 4. Fallback: Adivinha a partir do nome do projeto
+    guessed = project.replace("_", " ").replace("-", " ").strip()
+    return " ".join(word.capitalize() for word in guessed.split())
+
+def override_materia_in_markdown(markdown_content: str, materia: str) -> str:
+    import re
+    import unicodedata
+    if not materia:
+        return markdown_content
+        
+    fm_pattern = r'^(\s*---\s*\n)(.*?)(\n---\s*\n)'
+    fm_match = re.search(fm_pattern, markdown_content, re.DOTALL | re.MULTILINE)
+    
+    if fm_match:
+        prefix = fm_match.group(1)
+        body = fm_match.group(2)
+        suffix = fm_match.group(3)
+        
+        lines = body.splitlines()
+        materia_updated = False
+        new_lines = []
+        
+        for line in lines:
+            if ':' in line:
+                key, sep, val = line.partition(':')
+                norm_key = key.strip().lower()
+                norm_key = ''.join(c for c in unicodedata.normalize('NFD', norm_key) if unicodedata.category(c) != 'Mn')
+                if norm_key == 'materia':
+                    new_lines.append(f"{key.rstrip()}:{sep} {materia}")
+                    materia_updated = True
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+                
+        if not materia_updated:
+            new_lines.append(f"materia: {materia}")
+            
+        new_body = "\n".join(new_lines)
+        return markdown_content[:fm_match.start()] + prefix + new_body + suffix + markdown_content[fm_match.end():]
+    else:
+        title = "Aula"
+        title_match = re.search(r'^#\s+(.+)', markdown_content, re.MULTILINE)
+        if title_match:
+            title = title_match.group(1).strip()
+            
+        fm = f"---\ntitle: {title}\naula: 01\nmateria: {materia}\n---\n\n"
+        return fm + markdown_content
+
+@app.route("/api/projects/<project>/materia", methods=["GET"])
+def api_get_project_materia(project):
+    try:
+        materia = _get_project_materia(project)
+        return jsonify(ok=True, materia=materia)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route("/api/projects/<project>/materia", methods=["POST"])
+def api_save_project_materia(project):
+    data = request.json or {}
+    materia = data.get("materia", "").strip()
+    if not materia:
+        return jsonify(ok=False, error="Nome de matéria inválido")
+    try:
+        _save_project_info(project, {"materia": materia})
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
+
+@app.route("/api/projects/<project>/materia/detect", methods=["POST"])
+def api_detect_project_materia(project):
+    try:
+        detected = _detect_project_materia_backend(project)
+        _save_project_info(project, {"materia": detected})
+        return jsonify(ok=True, materia=detected)
+    except Exception as e:
+        return jsonify(ok=False, error=str(e))
 
 
 # ════════════════════════════════════════

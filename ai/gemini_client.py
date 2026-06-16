@@ -372,7 +372,7 @@ def review_and_polish_markdown(draft_markdown: str, model: str = None) -> str:
     return sanitize_markdown(response.text)
 
 
-def process_content_to_style(content_input: str, is_pdf: bool = False, model: str = None, filename: str = None) -> str:
+def process_content_to_style(content_input: str, is_pdf: bool = False, model: str = None, filename: str = None, materia: str = None) -> str:
     """
     Processa o conteúdo (bruto ou PDF) em um único passo otimizado,
     reescrevendo e polindo no padrão Evolux.
@@ -455,8 +455,13 @@ def process_content_to_style(content_input: str, is_pdf: bool = False, model: st
         "   - Use <sup> e </sup> para sobrescritos e graus Celsius. Exemplo: 35<sup>o</sup>C ou 10<sup>a</sup> aula.\n"
         "5. SANITIZAÇÃO DE MARCAÇÕES: Garanta que marcações [BOX] e [/BOX] fiquem puras em linhas isoladas. Tags de imagens devem usar [IMG:nome_imagem.png] (Descrição detalhada).\n"
         "6. PROIBIÇÃO DE BLOCKQUOTES (>): Nunca use o caractere '>' no início de linhas. Se necessário, coloque o texto dentro de um bloco [BOX].\n"
-        "7. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
     )
+    
+    if materia:
+        system_instruction += (
+            f"\n\n8. OBRIGATÓRIO: O nome da disciplina/matéria para esta aula é '{materia}'. "
+            f"Você DEVE definir no cabeçalho YAML exatamente: `materia: {materia}`.\n"
+        )
     
     config = types.GenerateContentConfig(
         system_instruction=system_instruction,
