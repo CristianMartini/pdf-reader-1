@@ -353,6 +353,20 @@ function selectProject(name) {
 
 function renderMain() {
   document.getElementById("mainArea").innerHTML = `
+    <!-- HEADER DO PROJETO E MATÉRIA -->
+    <div class="card full" style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding: 0.8rem 1.3rem; background: linear-gradient(135deg, #fafcff, #f0f4ff); border-left: 4px solid var(--gold); border-radius: 12px; margin-bottom: 0.2rem;">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span style="font-weight:700; color:var(--navy); font-size:1.05rem;">Projeto: <span id="currentProjectName" style="color:var(--gold);">${proj}</span></span>
+        <span style="color:var(--border);">|</span>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span style="font-weight:600; color:var(--navy); font-size:0.9rem;">Matéria Padrão:</span>
+          <input id="projectMateriaInput" type="text" style="padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; width: 220px; color:var(--navy); font-weight:600;" placeholder="Carregando..." onchange="saveProjectMateria(this.value)">
+          <button class="btn btn-primary btn-sm" onclick="detectProjectMateria()" title="Tentar detectar automaticamente dos arquivos do projeto">🔍 Auto-detectar</button>
+        </div>
+      </div>
+      <span style="font-size:0.75rem; color:var(--muted); max-width:300px; text-align:right;">Este nome será usado no cabeçalho de todas as novas aulas processadas.</span>
+    </div>
+
     <!-- COLUNA DA ESQUERDA: FLUXO DE ARQUIVOS (PASSO 1, 2 E 3) -->
     <div style="display: flex; flex-direction: column; gap: 1.2rem;">
       
@@ -486,6 +500,71 @@ function renderMain() {
     </div>
   `;
   loadFiles();
+  loadProjectMateria();
+}
+
+// ══ MATÉRIA PADRÃO DO PROJETO ══
+async function loadProjectMateria() {
+  if (!proj) return;
+  const input = document.getElementById("projectMateriaInput");
+  if (input) input.disabled = true;
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(proj)}/materia`);
+    const data = await res.json();
+    if (input) {
+      input.value = data.materia || "";
+      input.disabled = false;
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+async function saveProjectMateria(materia) {
+  if (!proj) return;
+  const input = document.getElementById("projectMateriaInput");
+  if (input) input.disabled = true;
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(proj)}/materia`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ materia })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      toast("✅ Matéria atualizada e salva", "success");
+    } else {
+      toast("❌ Erro ao salvar matéria: " + data.error, "error");
+    }
+  } catch (err) {
+    console.error(err);
+    toast("❌ Falha ao salvar matéria", "error");
+  } finally {
+    if (input) input.disabled = false;
+  }
+}
+
+async function detectProjectMateria() {
+  if (!proj) return;
+  const input = document.getElementById("projectMateriaInput");
+  if (input) input.disabled = true;
+  toast("Buscando matéria nos arquivos do projeto...", "info");
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(proj)}/materia/detect`, { method: "POST" });
+    const data = await res.json();
+    if (data.ok && data.materia) {
+      if (input) input.value = data.materia;
+      toast(`✅ Matéria detectada: "${data.materia}"`, "success");
+    } else {
+      toast("⚠️ Não foi possível detectar nos arquivos existentes. Usando nome do projeto.", "warning");
+      if (input && data.materia) input.value = data.materia;
+    }
+  } catch (err) {
+    console.error(err);
+    toast("❌ Erro ao detectar matéria", "error");
+  } finally {
+    if (input) input.disabled = false;
+  }
 }
 
 // ══ ARQUIVOS ══
