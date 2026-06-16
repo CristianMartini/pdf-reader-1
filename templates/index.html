@@ -329,6 +329,7 @@ function renderMain() {
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 3</span>
             <span>🖼️ Inserir Imagens</span>
+            <span id="imgCount" style="font-size:.8rem;color:var(--muted);font-weight:normal; margin-left: 6px;"></span>
           </div>
           <div>
             <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
@@ -429,6 +430,9 @@ async function loadFiles(force=false) {
         </div>
       `;
     }).join("") || '<p class="muted">Nenhuma imagem</p>';
+    const c = d.imgs.length;
+    const el = document.getElementById("imgCount");
+    if (el) el.textContent = c ? `(${c} imagem${c>1?'ns':''})` : "(0 imagens)";
   }
 
   const pdfSig = JSON.stringify(d.pdfs);
