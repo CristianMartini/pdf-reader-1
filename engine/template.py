@@ -343,6 +343,10 @@ def draw_cover(canvas, doc, meta: dict, assets: str):
 # ════════════════════════════════════════
 def header_footer(canvas, doc, assets: str):
     """Cabeçalho com logo (sem fundo) + linha dourada. Rod. com paginação centralizada."""
+    # Ignora totalmente a primeira página (capa branca)
+    if doc.page == 1:
+        return
+
     canvas.saveState()
 
     header_y = H - 1.9 * cm
@@ -376,7 +380,7 @@ def header_footer(canvas, doc, assets: str):
 
     canvas.setFillColor(GRAY)
     canvas.setFont(FONT_REG, 10)
-    canvas.drawRightString(W - 2 * cm, footer_y - 0.05 * cm, str(doc.page + 1))
+    canvas.drawRightString(W - 2 * cm, footer_y - 0.05 * cm, str(doc.page))
 
     canvas.restoreState()
 
@@ -711,6 +715,10 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
     )
 
     story = parse_md(md_path, assets_dir, meta)
+
+    # Adiciona a página de capa em branco (totalmente branca) no início
+    story.insert(0, PageBreak())
+    story.insert(0, Spacer(1, 1))
 
     doc.build(
         story,
