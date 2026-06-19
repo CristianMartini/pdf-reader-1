@@ -90,12 +90,12 @@ def _logo_path(assets: str):
 
 def _cover_path(assets: str, filename_stem: str = None):
     if filename_stem:
-        for prefix in (f"{filename_stem}_cover", filename_stem, f"cover_{filename_stem}"):
+        for prefix in (f"{filename_stem}_cover", f"cover_{filename_stem}", f"{filename_stem}_capa", f"capa_{filename_stem}", filename_stem):
             for ext in (".jpg", ".jpeg", ".png", ".webp"):
                 p = os.path.join(assets, f"{prefix}{ext}")
                 if os.path.exists(p):
                     return p
-    for n in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp"):
+    for n in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "capa.jpg", "capa.jpeg", "capa.png", "capa.webp"):
         p = os.path.join(assets, n)
         if os.path.exists(p):
             return p
