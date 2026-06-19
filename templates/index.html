@@ -284,6 +284,7 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 let proj = null;   // projeto ativo
 let file = null;   // arquivo ativo
 let currentImagesList = []; // lista de imagens do projeto ativo
+let currentCoversList = []; // lista de capas do projeto ativo
 let _mdSig = "", _pdfSig = "", _imgSig = "";
 let _toastT = null;
 let uploadQueue = []; // Fila de uploads para IA
@@ -592,7 +593,8 @@ async function loadFiles(force=false) {
   const d = await r.json();
 
   currentImagesList = d.imgs || [];
-  renderCoverPreview(currentImagesList);
+  currentCoversList = d.covers || [];
+  renderCoverPreview(currentCoversList);
 
   const mdSig = JSON.stringify(d.mds);
   if (mdSig !== _mdSig) {
@@ -607,10 +609,7 @@ async function loadFiles(force=false) {
   const imgSig = JSON.stringify(d.imgs);
   if (imgSig !== _imgSig) {
     _imgSig = imgSig;
-    const normalImages = d.imgs.filter(f => {
-      const lf = f.toLowerCase();
-      return !lf.includes("cover") && !lf.includes("capa");
-    });
+    const normalImages = d.imgs || [];
     document.getElementById("imgList").innerHTML = normalImages.map(f => {
       const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       return `
@@ -731,7 +730,7 @@ async function loadFile(filename) {
   document.getElementById("btnDel").style.display = "block";
   document.getElementById("log").classList.remove("on");
   file = filename;
-  renderCoverPreview(currentImagesList);
+  renderCoverPreview(currentCoversList);
   _mdSig = ""; loadFiles(true);
 }
 
@@ -759,7 +758,7 @@ async function deleteCurrentFile() {
   document.getElementById("fileName").textContent = "Nenhum arquivo";
   document.getElementById("ed").value = "";
   document.getElementById("btnDel").style.display = "none";
-  renderCoverPreview(currentImagesList);
+  renderCoverPreview(currentCoversList);
 }
 
 async function delFile(kind, filename) {
@@ -898,31 +897,7 @@ async function uploadFile(input, kind) {
 async function uploadCover(input) {
   if (!input.files || input.files.length === 0 || !proj) return;
   const files = Array.from(input.files);
-  
-  if (files.length === 1) {
-    const originalFile = files[0];
-    const ext = originalFile.name.substring(originalFile.name.lastIndexOf('.')).toLowerCase();
-    
-    let targetName = "cover" + ext;
-    if (file) {
-      const stem = file.substring(0, file.lastIndexOf('.'));
-      targetName = `${stem}_cover${ext}`;
-    }
-    
-    originalFile.targetName = targetName;
-    await uploadFilesDirectly([originalFile], 'img');
-  } else {
-    // Para múltiplos arquivos de capa, garante que cada um deles tenha "_cover" no nome
-    for (let fObj of files) {
-      const lf = fObj.name.toLowerCase();
-      if (!lf.includes("cover") && !lf.includes("capa")) {
-        const ext = fObj.name.substring(fObj.name.lastIndexOf('.')).toLowerCase();
-        const stem = fObj.name.substring(0, fObj.name.lastIndexOf('.'));
-        fObj.targetName = `${stem}_cover${ext}`;
-      }
-    }
-    await uploadFilesDirectly(files, 'img');
-  }
+  await uploadFilesDirectly(files, 'cover');
   input.value = "";
 }
 
@@ -1110,7 +1085,7 @@ function selectCover(coverName) {
   toast(coverName ? `📷 Capa "${coverName}" selecionada!` : "📷 Capa removida (página ficará branca)");
 }
 
-function renderCoverPreview(imgs) {
+function renderCoverPreview(coversList) {
   const container = document.getElementById("coverList");
   if (!container) return;
   
@@ -1119,36 +1094,34 @@ function renderCoverPreview(imgs) {
     return;
   }
   
-  // Filtra as imagens do projeto que contêm 'cover' ou 'capa' no nome
-  const coverImages = imgs.filter(f => {
-    const lf = f.toLowerCase();
-    return lf.includes("cover") || lf.includes("capa");
-  });
-  
   const selectedCover = getSelectedCoverFromEditor();
   let html = "";
   
   // Opção "Nenhuma capa"
   const noneChecked = !selectedCover ? "checked" : "";
   html += `
-    <div class="file-item" style="display: flex; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; gap: 8px; margin-bottom: 4px;">
-      <input type="radio" name="coverSelect" value="" ${noneChecked} onclick="selectCover('')" style="cursor:pointer; width:16px; height:16px;">
+    <div class="img-item" style="display: flex; align-items: center; padding: 6px 8px; gap: 8px; margin-bottom: 4px;">
+      <input type="radio" name="coverSelect" value="" ${noneChecked} onclick="selectCover('')" style="cursor:pointer; width:16px; height:16px; flex-shrink:0;">
       <span class="f-name" style="flex: 1; font-size: 0.82rem; color: var(--muted); font-weight: bold;">[ Nenhuma Capa - Página Branca ]</span>
     </div>
   `;
   
-  if (coverImages.length > 0) {
-    html += coverImages.map(f => {
-      const imgUrl = `/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}`;
+  if (coversList.length > 0) {
+    html += coversList.map(f => {
+      const imgUrl = `/projects/${encodeURIComponent(proj)}/covers/${encodeURIComponent(f)}`;
       const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       const isChecked = selectedCover === f ? "checked" : "";
       
       return `
-        <div class="file-item" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; gap: 8px; margin-bottom: 4px;">
-          <input type="radio" name="coverSelect" value="${f}" ${isChecked} onclick="selectCover('${safeF}')" style="cursor:pointer; width:16px; height:16px;">
-          <img src="${imgUrl}" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border);" alt="Thumb">
-          <span class="f-name" style="flex: 1; font-size: 0.82rem; word-break: break-all; color: var(--navy); font-weight: 600;">${f}</span>
-          <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; color: var(--red); border-color: transparent;" onclick="event.stopPropagation(); deleteCover('${safeF}')">🗑</button>
+        <div class="img-item"
+             data-img-url="${imgUrl}"
+             data-img-name="${f}"
+             onmouseenter="showImgPreview(event, this)"
+             onmousemove="moveImgPreview(event)"
+             onmouseleave="hideImgPreview()">
+          <input type="radio" name="coverSelect" value="${f}" ${isChecked} onclick="selectCover('${safeF}')" style="cursor:pointer; width:16px; height:16px; flex-shrink:0;">
+          <span class="f-name" style="cursor:pointer; flex:1; word-break:break-all; font-size:.82rem; font-weight:500;">${f}</span>
+          <button class="btn btn-ghost btn-sm" style="flex-shrink:0; padding:2px 6px;" onclick="event.stopPropagation(); deleteCover('${safeF}')">🗑</button>
         </div>
       `;
     }).join("");
@@ -1159,8 +1132,7 @@ function renderCoverPreview(imgs) {
 
 async function deleteCover(filename) {
   if (confirm(`Deseja realmente excluir a capa ${filename}?`)) {
-    const safeF = filename.replace(/'/g, "\\'").replace(/"/g, "&quot;");
-    await delFile('img', safeF);
+    await delFile('cover', filename);
   }
 }
 

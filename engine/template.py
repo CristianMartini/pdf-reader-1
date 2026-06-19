@@ -89,10 +89,24 @@ def _logo_path(assets: str):
 
 
 def _cover_path(assets: str, meta: dict = None):
+    # A pasta covers/ fica ao lado de assets/ (irmã)
+    covers_dir = os.path.join(os.path.dirname(assets), "covers")
+
+    # 1. Se o meta YAML define uma capa explícita, procura em covers/ e assets/
     if meta and meta.get("capa"):
-        p = os.path.join(assets, meta.get("capa"))
-        if os.path.exists(p):
-            return p
+        capa_name = meta.get("capa")
+        for d in (covers_dir, assets):
+            p = os.path.join(d, capa_name)
+            if os.path.exists(p):
+                return p
+
+    # 2. Procura qualquer arquivo de imagem na pasta covers/
+    if os.path.isdir(covers_dir):
+        for f in os.listdir(covers_dir):
+            if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+                return os.path.join(covers_dir, f)
+
+    # 3. Fallback legado: nomes genéricos na pasta assets/
     for n in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "capa.jpg", "capa.jpeg", "capa.png", "capa.webp"):
         p = os.path.join(assets, n)
         if os.path.exists(p):
