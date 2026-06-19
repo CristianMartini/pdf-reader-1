@@ -617,6 +617,7 @@ def extract_meta(md_path: str) -> dict:
     # Front-matter YAML (ignora BOM ou espaços invisíveis no início)
     fm = re.search(r'^\s*---\s*\n(.*?)\n---\s*\n', content, re.DOTALL | re.MULTILINE)
     if fm:
+        meta_dict = {}
         for line in fm.group(1).splitlines():
             if ':' in line:
                 key, _, val = line.partition(':')
@@ -625,13 +626,19 @@ def extract_meta(md_path: str) -> dict:
                 key = ''.join(c for c in unicodedata.normalize('NFD', key) if unicodedata.category(c) != 'Mn')
                 val = val.strip()
                 
+                meta_dict[key] = val
+                
                 if key in ('title', 'titulo'):
                     title = val
                 if key == 'aula':
                     aula = str(val).zfill(2)
                 if key == 'materia':
                     materia = val
-        return {"title": title, "aula": aula, "materia": materia}
+                    
+        meta_dict.setdefault("title", title)
+        meta_dict.setdefault("aula", aula)
+        meta_dict.setdefault("materia", materia)
+        return meta_dict
 
     # Primeiro # Heading
     h1 = re.search(r'^#\s+(.+)', content, re.MULTILINE)
