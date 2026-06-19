@@ -195,19 +195,19 @@ def _preprocess_image(img_path: str,
 # ════════════════════════════════════════
 # ESTILOS (ABNT-compatíveis)
 H1  = ParagraphStyle("H1",  fontName=FONT_BOLD, fontSize=16,
-                     textColor=NAVY, spaceBefore=18, spaceAfter=8, leading=22)
+                     textColor=NAVY, spaceBefore=22, spaceAfter=14, leading=22)
 MATERIA_STYLE = ParagraphStyle("MATERIA_STYLE", fontName=FONT_BOLD, fontSize=18,
                      textColor=NAVY, leading=24, alignment=1)
 TITLE_AULA = ParagraphStyle("TITLE_AULA", fontName=FONT_BOLD, fontSize=18,
                      textColor=NAVY, leading=24, alignment=1)
 H2  = ParagraphStyle("H2",  fontName=FONT_BOLD, fontSize=14,
-                     textColor=NAVY, spaceBefore=14, spaceAfter=6, leading=19)
+                     textColor=NAVY, spaceBefore=18, spaceAfter=12, leading=19)
 H3  = ParagraphStyle("H3",  fontName=FONT_BOLD, fontSize=12,
-                     textColor=NAVY, spaceBefore=10, spaceAfter=4, leading=16)
+                     textColor=NAVY, spaceBefore=16, spaceAfter=10, leading=16)
 H4  = ParagraphStyle("H4",  fontName=FONT_BOLD, fontSize=11.5,
-                     textColor=NAVY, spaceBefore=8, spaceAfter=3, leading=15)
+                     textColor=NAVY, spaceBefore=14, spaceAfter=10, leading=15)
 H5  = ParagraphStyle("H5",  fontName=FONT_BOLD, fontSize=10.5,
-                     textColor=NAVY, spaceBefore=6, spaceAfter=2, leading=14)
+                     textColor=NAVY, spaceBefore=12, spaceAfter=8, leading=14)
 BODY = ParagraphStyle("BODY", fontName=FONT_REG, fontSize=12,
                       leading=18, textColor=NAVY, spaceAfter=8, alignment=4)
 LIST = ParagraphStyle("LIST", fontName=FONT_REG, fontSize=12,
