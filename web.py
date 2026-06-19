@@ -364,6 +364,32 @@ def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = 
         print(f"❌ Firebase: Erro ao fazer upload de {filename}: {e}")
 
 
+def _upload_file_to_firebase_ex(project_name: str, filename: str, kind: str):
+    """Upload with explicit kind (md, img, cover, etc.)."""
+    b = get_bucket()
+    if not b:
+        return
+
+    try:
+        local_proj_dir = os.path.join(PROJECTS, project_name)
+        if kind == "img":
+            local_path = os.path.join(local_proj_dir, "assets", filename)
+            blob_path = f"projects/{project_name}/assets/{filename}"
+        elif kind == "cover":
+            local_path = os.path.join(local_proj_dir, "covers", filename)
+            blob_path = f"projects/{project_name}/covers/{filename}"
+        else:
+            local_path = os.path.join(local_proj_dir, filename)
+            blob_path = f"projects/{project_name}/{filename}"
+
+        if os.path.isfile(local_path):
+            blob = b.blob(blob_path)
+            blob.upload_from_filename(local_path)
+            print(f"📤 Firebase: Upload concluído para {blob_path}")
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao fazer upload de {filename}: {e}")
+
+
 def _download_file_from_firebase(project_name: str, filename: str, is_asset: bool = False) -> bool:
     b = get_bucket()
     if not b:
@@ -388,6 +414,24 @@ def _download_file_from_firebase(project_name: str, filename: str, is_asset: boo
     return False
 
 
+def _download_cover_from_firebase(project_name: str, filename: str) -> bool:
+    b = get_bucket()
+    if not b:
+        return False
+    try:
+        local_path = os.path.join(_cdir(project_name), filename)
+        blob_path = f"projects/{project_name}/covers/{filename}"
+        blob = b.blob(blob_path)
+        if blob.exists():
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            blob.download_to_filename(local_path)
+            print(f"📥 Firebase: Sincronizado cover {blob_path} -> {local_path}")
+            return True
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao baixar cover {filename}: {e}")
+    return False
+
+
 def _download_all_assets(project_name: str):
     b = get_bucket()
     if not b:
@@ -407,6 +451,22 @@ def _download_all_assets(project_name: str):
     except Exception as e:
         print(f"❌ Firebase: Erro ao baixar todos os assets para PDF gen: {e}")
 
+    # Também baixa capas da pasta covers/
+    try:
+        prefix_c = f"projects/{project_name}/covers/"
+        blobs_c = b.list_blobs(prefix=prefix_c)
+        local_cdir = _cdir(project_name)
+        for blob in blobs_c:
+            if blob.name.endswith('/'):
+                continue
+            rel_path = os.path.relpath(blob.name, f"projects/{project_name}/covers")
+            local_path = os.path.join(local_cdir, rel_path)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            blob.download_to_filename(local_path)
+            print(f"📥 Firebase PDF Gen: Baixado cover {blob.name} -> {local_path}")
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao baixar covers para PDF gen: {e}")
+
 
 def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
     b = get_bucket()
@@ -416,6 +476,8 @@ def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
     try:
         if kind == "img":
             blob_path = f"projects/{project_name}/assets/{filename}"
+        elif kind == "cover":
+            blob_path = f"projects/{project_name}/covers/{filename}"
         else:
             blob_path = f"projects/{project_name}/{filename}"
             
@@ -451,6 +513,9 @@ def _pdir(project: str) -> str:
 
 def _adir(project: str) -> str:
     return os.path.join(_pdir(project), "assets")
+
+def _cdir(project: str) -> str:
+    return os.path.join(_pdir(project), "covers")
 
 
 # ════════════════════════════════════════
@@ -516,6 +581,7 @@ def api_create_project():
     pd = _pdir(safe)
     os.makedirs(pd, exist_ok=True)
     os.makedirs(_adir(safe), exist_ok=True)
+    os.makedirs(_cdir(safe), exist_ok=True)
     
     # Criar e fazer o upload do arquivo .keep para garantir persistência no Firebase Storage
     keep_path = os.path.join(pd, ".keep")
@@ -574,6 +640,7 @@ def api_files(project):
     mds = []
     imgs = []
     pdfs = []
+    covers = []
     
     if b:
         try:
@@ -591,7 +658,11 @@ def api_files(project):
                 if rel_path == ".keep":
                     continue
                     
-                if rel_path.startswith("assets/"):
+                if rel_path.startswith("covers/"):
+                    cover_name = os.path.basename(rel_path)
+                    if cover_name and cover_name not in covers:
+                        covers.append(cover_name)
+                elif rel_path.startswith("assets/"):
                     img_name = os.path.basename(rel_path)
                     if img_name and img_name not in imgs:
                         imgs.append(img_name)
@@ -610,9 +681,10 @@ def api_files(project):
             print(f"❌ Firebase: Erro ao listar arquivos de {project}: {e}")
             
     # Fallback para listagem local caso o Firebase falhe
-    if not mds and not imgs and not pdfs:
+    if not mds and not imgs and not pdfs and not covers:
         pd = _pdir(project)
         ad = _adir(project)
+        cd = _cdir(project)
         mds  = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(pd, "*.md")))]
         imgs = [os.path.basename(p) for p in sorted(
             glob.glob(os.path.join(ad, "*.*")), key=os.path.getmtime, reverse=True
@@ -620,8 +692,13 @@ def api_files(project):
         pdfs = [os.path.basename(p) for p in sorted(
             glob.glob(os.path.join(pd, "*.pdf")), key=os.path.getmtime, reverse=True
         )]
+        if os.path.isdir(cd):
+            covers = [os.path.basename(p) for p in sorted(
+                glob.glob(os.path.join(cd, "*.*")), key=os.path.getmtime, reverse=True
+            )]
         
-    return jsonify(mds=mds, imgs=imgs, pdfs=pdfs)
+    return jsonify(mds=mds, imgs=imgs, pdfs=pdfs, covers=covers)
+
 
 
 @app.route("/api/file/<project>/<filename>")
@@ -657,7 +734,12 @@ def api_save(project):
 @app.route("/api/upload/<project>/<kind>", methods=["POST"])
 def api_upload(project, kind):
     files    = request.files.getlist("files")
-    dest_dir = _pdir(project) if kind == "md" else _adir(project)
+    if kind == "md":
+        dest_dir = _pdir(project)
+    elif kind == "cover":
+        dest_dir = _cdir(project)
+    else:
+        dest_dir = _adir(project)
     os.makedirs(dest_dir, exist_ok=True)
     saved = 0
     for f in files:
@@ -666,7 +748,7 @@ def api_upload(project, kind):
             local_path = os.path.join(dest_dir, safe_name)
             f.save(local_path)
             # Upload para o Firebase
-            _upload_file_to_firebase(project, safe_name, is_asset=(kind != "md"))
+            _upload_file_to_firebase_ex(project, safe_name, kind)
             saved += 1
             
             # Remove o arquivo local se for uma imagem ou PDF para economizar espaço
@@ -701,6 +783,8 @@ def api_upload_signed_url():
         blob_path = f"projects/{secure_filename(project)}/{safe_name}"
     elif kind == "img":
         blob_path = f"projects/{secure_filename(project)}/assets/{safe_name}"
+    elif kind == "cover":
+        blob_path = f"projects/{secure_filename(project)}/covers/{safe_name}"
     elif kind == "queue":
         blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
     else:
@@ -744,6 +828,9 @@ def api_upload_confirm(project, kind):
     elif kind == "img":
         blob_path = f"projects/{safe_proj}/assets/{filename}"
         local_path = os.path.join(_adir(safe_proj), filename)
+    elif kind == "cover":
+        blob_path = f"projects/{safe_proj}/covers/{filename}"
+        local_path = os.path.join(_cdir(safe_proj), filename)
     else:
         return jsonify(ok=False, error="Tipo inválido")
 
@@ -772,16 +859,17 @@ def api_delete_file(project, kind, filename):
         path = os.path.join(_pdir(project), filename)
     elif kind == "img":
         path = os.path.join(_adir(project), filename)
+    elif kind == "cover":
+        path = os.path.join(_cdir(project), filename)
     elif kind == "pdf":
         path = os.path.join(_pdir(project), filename)
     else:
         return jsonify(ok=False, error="Tipo inválido")
     if os.path.isfile(path):
         os.remove(path)
-        # Excluir do Firebase
-        _delete_file_from_firebase(project, filename, kind)
-        return jsonify(ok=True)
-    return jsonify(ok=False, error="Arquivo não encontrado")
+    # Excluir do Firebase (mesmo que não exista localmente)
+    _delete_file_from_firebase(project, filename, kind)
+    return jsonify(ok=True)
 
 
 @app.route("/api/clear-images/<project>", methods=["DELETE"])
@@ -852,6 +940,14 @@ def api_generate():
                 print(f"🗑️ Local: Limpo diretório de assets temporários pós-compilação: {ad}")
         except Exception as ex:
             print(f"⚠️ Erro ao limpar assets temporários: {ex}")
+        # Limpa também a pasta de covers temporários
+        cd = _cdir(project)
+        try:
+            if os.path.isdir(cd):
+                shutil.rmtree(cd)
+                print(f"🗑️ Local: Limpo diretório de covers temporários pós-compilação: {cd}")
+        except Exception as ex:
+            print(f"⚠️ Erro ao limpar covers temporários: {ex}")
 
 
 # ════════════════════════════════════════
@@ -870,6 +966,13 @@ def serve_asset(project, filename):
     if not os.path.isfile(filepath):
         _download_file_from_firebase(project, filename, is_asset=True)
     return send_from_directory(_adir(project), filename)
+
+@app.route("/projects/<project>/covers/<path:filename>")
+def serve_cover(project, filename):
+    filepath = os.path.join(_cdir(project), filename)
+    if not os.path.isfile(filepath):
+        _download_cover_from_firebase(project, filename)
+    return send_from_directory(_cdir(project), filename)
 
 @app.route("/api/instrucoes-ia")
 def serve_ai_instructions():
