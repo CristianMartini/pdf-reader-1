@@ -88,7 +88,13 @@ def _logo_path(assets: str):
     return None
 
 
-def _cover_path(assets: str):
+def _cover_path(assets: str, filename_stem: str = None):
+    if filename_stem:
+        for prefix in (f"{filename_stem}_cover", filename_stem, f"cover_{filename_stem}"):
+            for ext in (".jpg", ".jpeg", ".png", ".webp"):
+                p = os.path.join(assets, f"{prefix}{ext}")
+                if os.path.exists(p):
+                    return p
     for n in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp"):
         p = os.path.join(assets, n)
         if os.path.exists(p):
@@ -254,86 +260,10 @@ IMG_COL_PLACEHOLDER_STYLE = ParagraphStyle(
 def draw_cover(canvas, doc, meta: dict, assets: str):
     canvas.saveState()
 
-    # 1. Fundo NAVY
-    canvas.setFillColor(NAVY)
-    canvas.rect(0, 0, W, H, fill=1, stroke=0)
-
-    # 2. Foto full-bleed
-    cover = _cover_path(assets)
+    cover = _cover_path(assets, meta.get("filename_stem"))
     if cover:
         canvas.drawImage(cover, 0, 0, width=W, height=H,
                          preserveAspectRatio=False, mask=_logo_mask(cover))
-
-    # 3. Triângulo NAVY — recorte sup-esq
-    canvas.setFillColor(NAVY)
-    p = canvas.beginPath()
-    p.moveTo(0, H)
-    p.lineTo(W * 0.42, H)
-    p.lineTo(0, H * 0.46)
-    p.close()
-    canvas.drawPath(p, fill=1, stroke=0)
-
-    # 4. Paralelogramo dourado principal
-    canvas.setFillColor(GOLD)
-    p = canvas.beginPath()
-    p.moveTo(380.23, H - 0.65)
-    p.lineTo(620.97, H - 141.05)
-    p.lineTo(240.90, H - 792.75)
-    p.lineTo(  0.16, H - 652.35)
-    p.close()
-    canvas.drawPath(p, fill=1, stroke=0)
-
-    # 5. Acento dourado — triângulo esquerdo
-    p = canvas.beginPath()
-    p.moveTo(  0,     H - 33.5)
-    p.lineTo(183.28,  H - 140.5)
-    p.lineTo(  0,     H - 454.6)
-    p.close()
-    canvas.drawPath(p, fill=1, stroke=0)
-
-    # 6. Logo — SEM caixa branca; usa mask correto por extensão
-    logo = _logo_path(assets)
-    if logo:
-        LBOX_X, LBOX_Y = 436, H - 134
-        LBOX_W, LBOX_H = 148, 124
-        pad = 10
-        canvas.drawImage(
-            logo,
-            LBOX_X + pad, LBOX_Y + pad,
-            width=LBOX_W - 2 * pad, height=LBOX_H - 2 * pad,
-            preserveAspectRatio=True,
-            mask=_logo_mask(logo),
-        )
-
-    # 7. "Aula XX"
-    canvas.setFillColor(YELLOW)
-    canvas.setFont(FONT_BOLD, 14)
-    canvas.drawString(2 * cm, H - 534, f"Aula {meta.get('aula', '01')}")
-
-    # 8. Título - Renderizado dinamicamente com Paragraph para evitar sobreposição ou quebra da página
-    title = meta.get("title", "Sem título")
-    if len(title) <= 30:
-        font_sz = 44
-        leading = 50
-    elif len(title) <= 60:
-        font_sz = 32
-        leading = 38
-    else:
-        font_sz = 24
-        leading = 28
-
-    cover_title_style = ParagraphStyle(
-        "CoverTitle",
-        fontName=FONT_BOLD,
-        fontSize=font_sz,
-        leading=leading,
-        textColor=colors.white
-    )
-    p = Paragraph(title, cover_title_style)
-    # Limita a largura em 12.5 cm para não colidir com o paralelograma dourado da capa
-    w_p, h_p = p.wrap(12.5 * cm, H)
-    title_y = H - 534 - 18 - h_p
-    p.drawOn(canvas, 2 * cm, title_y)
 
     canvas.restoreState()
 
@@ -704,9 +634,13 @@ def extract_meta(md_path: str) -> dict:
 # ════════════════════════════════════════
 def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
     """
-    Build direto ao conteúdo — sem capa.
+    Build com página de capa e conteúdo interno.
     Margens ABNT ajustadas: Superior 3.5cm | Inferior 3.2cm (para evitar sobreposição)
     """
+    if not meta:
+        meta = {}
+    meta['filename_stem'] = os.path.splitext(os.path.basename(md_path))[0]
+
     doc = SimpleDocTemplate(
         output_path, pagesize=A4,
         leftMargin=3 * cm, rightMargin=2 * cm,
@@ -716,13 +650,13 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
 
     story = parse_md(md_path, assets_dir, meta)
 
-    # Adiciona a página de capa em branco (totalmente branca) no início
+    # Adiciona a página de capa no início
     story.insert(0, PageBreak())
     story.insert(0, Spacer(1, 1))
 
     doc.build(
         story,
-        onFirstPage=lambda c, d: header_footer(c, d, assets_dir),
+        onFirstPage=lambda c, d: draw_cover(c, d, meta, assets_dir),
         onLaterPages=lambda c, d: header_footer(c, d, assets_dir),
     )
     print(f"  [OK] {os.path.basename(output_path)}")

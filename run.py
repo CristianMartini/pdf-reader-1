@@ -95,9 +95,9 @@ def process_many(md_files: list[str], output_dir: str = OUTPUTS) -> list[str]:
     ok, fail = [], []
     total = len(md_files)
 
-    print(f"\n{'═'*50}")
+    print(f"\n{'='*50}")
     print(f"  Processando {total} arquivo(s)...")
-    print(f"{'═'*50}")
+    print(f"{'='*50}")
 
     t0 = time.time()
     for i, md in enumerate(md_files, 1):
@@ -109,11 +109,11 @@ def process_many(md_files: list[str], output_dir: str = OUTPUTS) -> list[str]:
             fail.append(md)
 
     elapsed = time.time() - t0
-    print(f"\n{'═'*50}")
+    print(f"\n{'='*50}")
     print(f"  ✅ {len(ok)} gerado(s)  ❌ {len(fail)} erro(s)  ⏱ {elapsed:.1f}s")
     if ok:
         print(f"  📁 PDFs em: {output_dir}")
-    print(f"{'═'*50}\n")
+    print(f"{'='*50}\n")
     return ok
 
 

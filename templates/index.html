@@ -439,10 +439,12 @@ function renderMain() {
             <span>🖼️ Inserir Imagens</span>
             <span id="imgCount" style="font-size:.8rem;color:var(--muted);font-weight:normal; margin-left: 6px;"></span>
           </div>
-          <div>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('coverUp').click()" title="Fazer upload da imagem de capa (salva como '[nome_da_aula]_cover' se houver aula ativa)">📷 Capa</button>
             <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
-            <button class="btn btn-danger btn-sm" onclick="clearImages()" style="margin-left:4px;">🗑 Limpar</button>
+            <button class="btn btn-danger btn-sm" onclick="clearImages()">🗑 Limpar</button>
             <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
+            <input type="file" id="coverUp" accept="image/*" style="display:none" onchange="uploadCover(this)">
           </div>
         </div>
         <p class="muted" style="margin-bottom:.6rem;">Clique para inserir no cursor do editor ou selecione caixas para agrupar.</p>
@@ -589,6 +591,10 @@ async function loadFiles(force=false) {
     _imgSig = imgSig;
     document.getElementById("imgList").innerHTML = d.imgs.map(f => {
       const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+      const isCover = f.toLowerCase().includes("cover");
+      const icon = isCover ? "📷" : "🖼️";
+      const nameStyle = isCover ? "color: var(--navy); font-weight: bold;" : "";
+      const badge = isCover ? `<span style="font-size: 0.7rem; background: var(--gold); color: var(--navy); padding: 1px 4px; border-radius: 4px; margin-left: 6px; font-weight: bold;">Capa</span>` : "";
       return `
         <div class="img-item"
              data-img-url="/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}"
@@ -597,8 +603,8 @@ async function loadFiles(force=false) {
              onmousemove="moveImgPreview(event)"
              onmouseleave="hideImgPreview()">
           <input type="checkbox" class="img-check" value="${f}" style="cursor:pointer; width:16px; height:16px; flex-shrink:0;" onclick="event.stopPropagation()">
-          <div class="img-icon" onclick="insImg('${safeF}')">🖼️</div>
-          <span class="f-name" style="cursor:pointer; flex:1; word-break:break-all; font-size:.82rem; font-weight:500;" onclick="insImg('${safeF}')" title="Inserir no editor">${f}</span>
+          <div class="img-icon" onclick="insImg('${safeF}')">${icon}</div>
+          <span class="f-name" style="cursor:pointer; flex:1; word-break:break-all; font-size:.82rem; font-weight:500; ${nameStyle}" onclick="insImg('${safeF}')" title="Inserir no editor">${f}${badge}</span>
           <button class="btn btn-ghost btn-sm" style="flex-shrink:0; padding:2px 6px;" onclick="event.stopPropagation(); delFile('img','${safeF}')">🗑</button>
         </div>
       `;
@@ -758,10 +764,9 @@ async function clearImages() {
   }
 }
 
-async function uploadFile(input, kind) {
-  if (!input.files.length || !proj) return;
+async function uploadFilesDirectly(files, kind) {
+  if (!files || !files.length || !proj) return 0;
   
-  const files = Array.from(input.files);
   let uploadSuccessCount = 0;
   let singleMdLoadedName = null;
   
@@ -858,8 +863,31 @@ async function uploadFile(input, kind) {
     }
   } finally {
     hideUploadOverlay();
-    input.value = "";
   }
+  return uploadSuccessCount;
+}
+
+async function uploadFile(input, kind) {
+  if (!input.files.length || !proj) return;
+  const files = Array.from(input.files);
+  await uploadFilesDirectly(files, kind);
+  input.value = "";
+}
+
+async function uploadCover(input) {
+  if (!input.files || input.files.length === 0 || !proj) return;
+  const originalFile = input.files[0];
+  const ext = originalFile.name.substring(originalFile.name.lastIndexOf('.')).toLowerCase();
+  
+  let targetName = "cover" + ext;
+  if (file) {
+    const stem = file.substring(0, file.lastIndexOf('.'));
+    targetName = `${stem}_cover${ext}`;
+  }
+  
+  const coverFile = new File([originalFile], targetName, { type: originalFile.type });
+  await uploadFilesDirectly([coverFile], 'img');
+  input.value = "";
 }
 
 // ══ GERAR PDF ══
