@@ -912,6 +912,15 @@ async function uploadCover(input) {
     originalFile.targetName = targetName;
     await uploadFilesDirectly([originalFile], 'img');
   } else {
+    // Para múltiplos arquivos de capa, garante que cada um deles tenha "_cover" no nome
+    for (let fObj of files) {
+      const lf = fObj.name.toLowerCase();
+      if (!lf.includes("cover") && !lf.includes("capa")) {
+        const ext = fObj.name.substring(fObj.name.lastIndexOf('.')).toLowerCase();
+        const stem = fObj.name.substring(0, fObj.name.lastIndexOf('.'));
+        fObj.targetName = `${stem}_cover${ext}`;
+      }
+    }
     await uploadFilesDirectly(files, 'img');
   }
   input.value = "";
