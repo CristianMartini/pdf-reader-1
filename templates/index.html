@@ -1033,6 +1033,74 @@ function insBox() {
 }
 
 // ══ PREVIEW DE CAPA ══
+// ══ SELEÇÃO MANUAL DE CAPA ══
+function getSelectedCoverFromEditor() {
+  const ed = document.getElementById("ed");
+  if (!ed) return null;
+  const val = ed.value;
+  const fmRegex = /^(\s*---\s*\n)([\s\S]*?)(\n---\s*\n|$)/;
+  const match = val.match(fmRegex);
+  if (match) {
+    const fmContent = match[2];
+    for (let line of fmContent.split('\n')) {
+      if (line.trim().toLowerCase().startsWith("capa:")) {
+        const parts = line.split(':');
+        if (parts.length > 1) {
+          return parts[1].trim();
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function selectCover(coverName) {
+  if (!file) {
+    toast("Selecione um documento (.md) primeiro para associar a capa!", "warning");
+    loadFiles(); // Recarrega para desmarcar o rádio selecionado
+    return;
+  }
+  
+  const ed = document.getElementById("ed");
+  if (!ed) return;
+  let val = ed.value;
+  
+  const fmRegex = /^(\s*---\s*\n)([\s\S]*?)(\n---\s*\n|$)/;
+  const match = val.match(fmRegex);
+  
+  if (match) {
+    let fmContent = match[2];
+    let lines = fmContent.split('\n');
+    let replaced = false;
+    
+    if (coverName) {
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim().toLowerCase().startsWith("capa:")) {
+          lines[i] = `capa: ${coverName}`;
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) {
+        lines.push(`capa: ${coverName}`);
+      }
+    } else {
+      // Remove a propriedade capa
+      lines = lines.filter(line => !line.trim().toLowerCase().startsWith("capa:"));
+    }
+    
+    fmContent = lines.join('\n');
+    ed.value = val.replace(fmRegex, `$1${fmContent}$3`);
+  } else {
+    if (coverName) {
+      ed.value = `---\ncapa: ${coverName}\n---\n\n` + val;
+    }
+  }
+  
+  saveFile();
+  toast(coverName ? `📷 Capa "${coverName}" selecionada!` : "📷 Capa removida (página ficará branca)");
+}
+
 function renderCoverPreview(imgs) {
   const container = document.getElementById("coverList");
   if (!container) return;
@@ -1048,41 +1116,36 @@ function renderCoverPreview(imgs) {
     return lf.includes("cover") || lf.includes("capa");
   });
   
+  const selectedCover = getSelectedCoverFromEditor();
+  let html = "";
+  
+  // Opção "Nenhuma capa"
+  const noneChecked = !selectedCover ? "checked" : "";
+  html += `
+    <div class="file-item" style="display: flex; align-items: center; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; gap: 8px; margin-bottom: 4px;">
+      <input type="radio" name="coverSelect" value="" ${noneChecked} onclick="selectCover('')" style="cursor:pointer; width:16px; height:16px;">
+      <span class="f-name" style="flex: 1; font-size: 0.82rem; color: var(--muted); font-weight: bold;">[ Nenhuma Capa - Página Branca ]</span>
+    </div>
+  `;
+  
   if (coverImages.length > 0) {
-    container.innerHTML = coverImages.map(f => {
+    html += coverImages.map(f => {
       const imgUrl = `/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}`;
       const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+      const isChecked = selectedCover === f ? "checked" : "";
       
-      // Verifica se é específica da aula ativa
-      let isSpecific = false;
-      if (file) {
-        const stem = file.substring(0, file.lastIndexOf('.')).toLowerCase();
-        if (f.toLowerCase().includes(stem)) {
-          isSpecific = true;
-        }
-      }
-      
-      const badge = isSpecific 
-        ? `<span style="font-size: 0.7rem; background: var(--navy); color: white; padding: 1px 4px; border-radius: 4px; margin-left: 6px; font-weight: bold;">Aula Ativa</span>`
-        : `<span style="font-size: 0.7rem; background: var(--border); color: var(--navy); padding: 1px 4px; border-radius: 4px; margin-left: 6px;">Capa</span>`;
-        
       return `
         <div class="file-item" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; gap: 8px; margin-bottom: 4px;">
+          <input type="radio" name="coverSelect" value="${f}" ${isChecked} onclick="selectCover('${safeF}')" style="cursor:pointer; width:16px; height:16px;">
           <img src="${imgUrl}" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border);" alt="Thumb">
-          <span class="f-name" style="flex: 1; font-size: 0.82rem; word-break: break-all; color: var(--navy); font-weight: 600;">${f}${badge}</span>
+          <span class="f-name" style="flex: 1; font-size: 0.82rem; word-break: break-all; color: var(--navy); font-weight: 600;">${f}</span>
           <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; color: var(--red); border-color: transparent;" onclick="event.stopPropagation(); deleteCover('${safeF}')">🗑</button>
         </div>
       `;
     }).join("");
-  } else {
-    const activeInfo = file ? `para a aula <strong>${file}</strong>` : "para o projeto";
-    container.innerHTML = `
-      <div style="text-align: center; padding: 12px 0;">
-        <p class="muted" style="margin: 0 0 4px 0; font-size: 0.82rem;">Nenhuma capa detectada ${activeInfo}.</p>
-        <p class="muted" style="margin: 0; font-size: 0.75rem; color: #a0aec0;">Páginas de capa sem imagem ficarão <strong>em branco</strong>.</p>
-      </div>
-    `;
   }
+  
+  container.innerHTML = html;
 }
 
 async function deleteCover(filename) {

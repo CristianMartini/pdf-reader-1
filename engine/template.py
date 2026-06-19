@@ -88,13 +88,11 @@ def _logo_path(assets: str):
     return None
 
 
-def _cover_path(assets: str, filename_stem: str = None):
-    if filename_stem:
-        for prefix in (f"{filename_stem}_cover", f"cover_{filename_stem}", f"{filename_stem}_capa", f"capa_{filename_stem}", filename_stem):
-            for ext in (".jpg", ".jpeg", ".png", ".webp"):
-                p = os.path.join(assets, f"{prefix}{ext}")
-                if os.path.exists(p):
-                    return p
+def _cover_path(assets: str, meta: dict = None):
+    if meta and meta.get("capa"):
+        p = os.path.join(assets, meta.get("capa"))
+        if os.path.exists(p):
+            return p
     for n in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp", "capa.jpg", "capa.jpeg", "capa.png", "capa.webp"):
         p = os.path.join(assets, n)
         if os.path.exists(p):
@@ -260,7 +258,7 @@ IMG_COL_PLACEHOLDER_STYLE = ParagraphStyle(
 def draw_cover(canvas, doc, meta: dict, assets: str):
     canvas.saveState()
 
-    cover = _cover_path(assets, meta.get("filename_stem"))
+    cover = _cover_path(assets, meta)
     if cover:
         canvas.drawImage(cover, 0, 0, width=W, height=H,
                          preserveAspectRatio=False, mask=_logo_mask(cover))
