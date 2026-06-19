@@ -607,7 +607,10 @@ async function loadFiles(force=false) {
   const imgSig = JSON.stringify(d.imgs);
   if (imgSig !== _imgSig) {
     _imgSig = imgSig;
-    const normalImages = d.imgs.filter(f => !f.toLowerCase().includes("cover"));
+    const normalImages = d.imgs.filter(f => {
+      const lf = f.toLowerCase();
+      return !lf.includes("cover") && !lf.includes("capa");
+    });
     document.getElementById("imgList").innerHTML = normalImages.map(f => {
       const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       return `
@@ -1031,54 +1034,51 @@ function insBox() {
 
 // ══ PREVIEW DE CAPA ══
 function renderCoverPreview(imgs) {
-  const container = document.getElementById("coverPreviewContainer");
+  const container = document.getElementById("coverList");
   if (!container) return;
   
   if (!proj) {
-    container.innerHTML = `<p class="muted" style="text-align: center; margin: 12px 0; font-size: 0.82rem;">Selecione um projeto para ver a capa.</p>`;
+    container.innerHTML = `<p class="muted" style="text-align: center; margin: 12px 0; font-size: 0.82rem;">Selecione um projeto para ver as capas.</p>`;
     return;
   }
   
-  // Encontra a capa correspondente à aula ativa ou capa geral
-  let activeCover = null;
-  let isSpecific = false;
+  // Filtra as imagens do projeto que contêm 'cover' ou 'capa' no nome
+  const coverImages = imgs.filter(f => {
+    const lf = f.toLowerCase();
+    return lf.includes("cover") || lf.includes("capa");
+  });
   
-  if (file) {
-    const stem = file.substring(0, file.lastIndexOf('.')).toLowerCase();
-    activeCover = imgs.find(f => {
-      const lf = f.toLowerCase();
-      return lf === `${stem}_cover.png` || lf === `${stem}_cover.jpg` || lf === `${stem}_cover.jpeg` || lf === `${stem}_cover.webp` ||
-             lf === `${stem}.png` || lf === `${stem}.jpg` || lf === `${stem}.jpeg` || lf === `${stem}.webp` ||
-             lf === `cover_${stem}.png` || lf === `cover_${stem}.jpg` || lf === `cover_${stem}.jpeg` || lf === `cover_${stem}.webp`;
-    });
-    if (activeCover) isSpecific = true;
-  }
-  
-  if (!activeCover) {
-    activeCover = imgs.find(f => {
-      const lf = f.toLowerCase();
-      return lf === "cover.png" || lf === "cover.jpg" || lf === "cover.jpeg" || lf === "cover.webp";
-    });
-  }
-  
-  if (activeCover) {
-    const imgUrl = `/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(activeCover)}`;
-    const label = isSpecific ? `Capa Específica (Aula Ativa)` : "Capa Geral do Projeto";
-    container.innerHTML = `
-      <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
-        <span style="font-size: 0.8rem; font-weight: bold; color: var(--navy);">${label}</span>
-        <div style="position: relative; width: 100%; max-width: 150px; aspect-ratio: 1/1.41; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #eee; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
-          <img src="${imgUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="Preview da Capa">
-          <button class="btn btn-danger btn-sm" style="position: absolute; top: 4px; right: 4px; padding: 4px 6px; font-size: 0.75rem; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);" onclick="event.stopPropagation(); deleteCover('${activeCover}')">🗑</button>
+  if (coverImages.length > 0) {
+    container.innerHTML = coverImages.map(f => {
+      const imgUrl = `/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}`;
+      const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+      
+      // Verifica se é específica da aula ativa
+      let isSpecific = false;
+      if (file) {
+        const stem = file.substring(0, file.lastIndexOf('.')).toLowerCase();
+        if (f.toLowerCase().includes(stem)) {
+          isSpecific = true;
+        }
+      }
+      
+      const badge = isSpecific 
+        ? `<span style="font-size: 0.7rem; background: var(--navy); color: white; padding: 1px 4px; border-radius: 4px; margin-left: 6px; font-weight: bold;">Aula Ativa</span>`
+        : `<span style="font-size: 0.7rem; background: var(--border); color: var(--navy); padding: 1px 4px; border-radius: 4px; margin-left: 6px;">Capa</span>`;
+        
+      return `
+        <div class="file-item" style="display: flex; align-items: center; justify-content: space-between; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; gap: 8px; margin-bottom: 4px;">
+          <img src="${imgUrl}" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border);" alt="Thumb">
+          <span class="f-name" style="flex: 1; font-size: 0.82rem; word-break: break-all; color: var(--navy); font-weight: 600;">${f}${badge}</span>
+          <button class="btn btn-ghost btn-sm" style="padding: 2px 6px; color: var(--red); border-color: transparent;" onclick="event.stopPropagation(); deleteCover('${safeF}')">🗑</button>
         </div>
-        <span style="font-size: 0.75rem; color: var(--muted); word-break: break-all; text-align: center;">${activeCover}</span>
-      </div>
-    `;
+      `;
+    }).join("");
   } else {
     const activeInfo = file ? `para a aula <strong>${file}</strong>` : "para o projeto";
     container.innerHTML = `
       <div style="text-align: center; padding: 12px 0;">
-        <p class="muted" style="margin: 0 0 6px 0; font-size: 0.82rem;">Nenhuma capa detectada ${activeInfo}.</p>
+        <p class="muted" style="margin: 0 0 4px 0; font-size: 0.82rem;">Nenhuma capa detectada ${activeInfo}.</p>
         <p class="muted" style="margin: 0; font-size: 0.75rem; color: #a0aec0;">Páginas de capa sem imagem ficarão <strong>em branco</strong>.</p>
       </div>
     `;
