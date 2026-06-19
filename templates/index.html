@@ -283,6 +283,7 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 <script>
 let proj = null;   // projeto ativo
 let file = null;   // arquivo ativo
+let currentImagesList = []; // lista de imagens do projeto ativo
 let _mdSig = "", _pdfSig = "", _imgSig = "";
 let _toastT = null;
 let uploadQueue = []; // Fila de uploads para IA
@@ -431,20 +432,36 @@ function renderMain() {
         <div class="file-list" id="mdList" style="max-height: 180px;"></div>
       </div>
 
-      <!-- CARD PASSO 3: IMAGENS -->
+      <!-- CARD PASSO 3: CAPA DO PDF -->
       <div class="card">
         <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 3</span>
-            <span>🖼️ Inserir Imagens</span>
+            <span>📷 Capa do PDF</span>
+          </div>
+          <div>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('coverUp').click()" title="Fazer upload de imagem de capa (se enviar 1 arquivo, ele é vinculado automaticamente ao markdown ativo)">＋ Capa</button>
+            <input type="file" id="coverUp" accept="image/*" multiple style="display:none" onchange="uploadCover(this)">
+          </div>
+        </div>
+        <p class="muted" style="margin-bottom:.6rem;">As capas ocupam 100% da primeira página. Se não houver capa, ela ficará em branco.</p>
+        <div id="coverPreviewContainer" style="display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px dashed var(--border); border-radius: 8px; background: #fafbfc;">
+          <p class="muted" style="text-align: center; margin: 12px 0; font-size: 0.82rem;">Nenhuma capa detectada.</p>
+        </div>
+      </div>
+
+      <!-- CARD PASSO 4: IMAGENS -->
+      <div class="card">
+        <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 4</span>
+            <span>🖼️ Inserir Imagens Internas</span>
             <span id="imgCount" style="font-size:.8rem;color:var(--muted);font-weight:normal; margin-left: 6px;"></span>
           </div>
           <div style="display: flex; gap: 4px;">
-            <button class="btn btn-primary btn-sm" onclick="document.getElementById('coverUp').click()" title="Fazer upload da imagem de capa (salva como '[nome_da_aula]_cover' se houver aula ativa)">📷 Capa</button>
             <button class="btn btn-gold btn-sm" onclick="document.getElementById('imgUp').click()">＋ Upload</button>
             <button class="btn btn-danger btn-sm" onclick="clearImages()">🗑 Limpar</button>
             <input type="file" id="imgUp" accept="image/*" multiple style="display:none" onchange="uploadFile(this,'img')">
-            <input type="file" id="coverUp" accept="image/*" style="display:none" onchange="uploadCover(this)">
           </div>
         </div>
         <p class="muted" style="margin-bottom:.6rem;">Clique para inserir no cursor do editor ou selecione caixas para agrupar.</p>
@@ -456,11 +473,11 @@ function renderMain() {
 
     </div>
 
-    <!-- COLUNA DA DIREITA: EDITOR E CRIAÇÃO (PASSO 4) -->
+    <!-- COLUNA DA DIREITA: EDITOR E CRIAÇÃO (PASSO 5) -->
     <div class="card" style="display: flex; flex-direction: column; gap: 0.8rem; height: 100%;">
       <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 0;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 4</span>
+          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 5</span>
           <span>✍️ Editor de Conteúdo</span>
         </div>
         <span id="fileName" style="font-size:.82rem;color:var(--muted);font-weight:normal;">Nenhum arquivo</span>
@@ -488,11 +505,11 @@ function renderMain() {
       <div class="log" id="log"></div>
     </div>
 
-    <!-- SEÇÃO INFERIOR: PDFs GERADOS (PASSO 5) -->
+    <!-- SEÇÃO INFERIOR: PDFs GERADOS (PASSO 6) -->
     <div class="card full">
       <div class="card-title" style="justify-content: space-between; align-items: center; gap: 8px;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 5</span>
+          <span style="background: var(--navy); color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; border: 1px solid var(--gold); font-weight: 700;">Passo 6</span>
           <span>📑 PDFs Gerados (Padrão Evolux)</span>
           <span id="pdfCount" style="font-size:.8rem;color:var(--muted);font-weight:normal; margin-left: 6px;"></span>
         </div>
@@ -575,6 +592,9 @@ async function loadFiles(force=false) {
   const url = `/api/files/${encodeURIComponent(proj)}` + (force ? "?force=true" : "");
   const r = await fetch(url);
   const d = await r.json();
+
+  currentImagesList = d.imgs || [];
+  renderCoverPreview(currentImagesList);
 
   const mdSig = JSON.stringify(d.mds);
   if (mdSig !== _mdSig) {
@@ -713,6 +733,7 @@ async function loadFile(filename) {
   document.getElementById("btnDel").style.display = "block";
   document.getElementById("log").classList.remove("on");
   file = filename;
+  renderCoverPreview(currentImagesList);
   _mdSig = ""; loadFiles(true);
 }
 
@@ -740,6 +761,7 @@ async function deleteCurrentFile() {
   document.getElementById("fileName").textContent = "Nenhum arquivo";
   document.getElementById("ed").value = "";
   document.getElementById("btnDel").style.display = "none";
+  renderCoverPreview(currentImagesList);
 }
 
 async function delFile(kind, filename) {
@@ -1003,6 +1025,69 @@ function insBox() {
   t.value = t.value.substring(0,s) + txt + t.value.substring(e);
   t.selectionStart = t.selectionEnd = s + txt.length;
   t.focus();
+}
+
+// ══ PREVIEW DE CAPA ══
+function renderCoverPreview(imgs) {
+  const container = document.getElementById("coverPreviewContainer");
+  if (!container) return;
+  
+  if (!proj) {
+    container.innerHTML = `<p class="muted" style="text-align: center; margin: 12px 0; font-size: 0.82rem;">Selecione um projeto para ver a capa.</p>`;
+    return;
+  }
+  
+  // Encontra a capa correspondente à aula ativa ou capa geral
+  let activeCover = null;
+  let isSpecific = false;
+  
+  if (file) {
+    const stem = file.substring(0, file.lastIndexOf('.')).toLowerCase();
+    activeCover = imgs.find(f => {
+      const lf = f.toLowerCase();
+      return lf === `${stem}_cover.png` || lf === `${stem}_cover.jpg` || lf === `${stem}_cover.jpeg` || lf === `${stem}_cover.webp` ||
+             lf === `${stem}.png` || lf === `${stem}.jpg` || lf === `${stem}.jpeg` || lf === `${stem}.webp` ||
+             lf === `cover_${stem}.png` || lf === `cover_${stem}.jpg` || lf === `cover_${stem}.jpeg` || lf === `cover_${stem}.webp`;
+    });
+    if (activeCover) isSpecific = true;
+  }
+  
+  if (!activeCover) {
+    activeCover = imgs.find(f => {
+      const lf = f.toLowerCase();
+      return lf === "cover.png" || lf === "cover.jpg" || lf === "cover.jpeg" || lf === "cover.webp";
+    });
+  }
+  
+  if (activeCover) {
+    const imgUrl = `/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(activeCover)}`;
+    const label = isSpecific ? `Capa Específica (Aula Ativa)` : "Capa Geral do Projeto";
+    container.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 6px;">
+        <span style="font-size: 0.8rem; font-weight: bold; color: var(--navy);">${label}</span>
+        <div style="position: relative; width: 100%; max-width: 150px; aspect-ratio: 1/1.41; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #eee; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+          <img src="${imgUrl}" style="width: 100%; height: 100%; object-fit: cover;" alt="Preview da Capa">
+          <button class="btn btn-danger btn-sm" style="position: absolute; top: 4px; right: 4px; padding: 4px 6px; font-size: 0.75rem; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);" onclick="event.stopPropagation(); deleteCover('${activeCover}')">🗑</button>
+        </div>
+        <span style="font-size: 0.75rem; color: var(--muted); word-break: break-all; text-align: center;">${activeCover}</span>
+      </div>
+    `;
+  } else {
+    const activeInfo = file ? `para a aula <strong>${file}</strong>` : "para o projeto";
+    container.innerHTML = `
+      <div style="text-align: center; padding: 12px 0;">
+        <p class="muted" style="margin: 0 0 6px 0; font-size: 0.82rem;">Nenhuma capa detectada ${activeInfo}.</p>
+        <p class="muted" style="margin: 0; font-size: 0.75rem; color: #a0aec0;">Páginas de capa sem imagem ficarão <strong>em branco</strong>.</p>
+      </div>
+    `;
+  }
+}
+
+async function deleteCover(filename) {
+  if (confirm(`Deseja realmente excluir a capa ${filename}?`)) {
+    const safeF = filename.replace(/'/g, "\\'").replace(/"/g, "&quot;");
+    await delFile('img', safeF);
+  }
 }
 
 // ══ TOAST ══
