@@ -88,7 +88,13 @@ def _logo_path(assets: str):
     return None
 
 
-def _cover_path(assets: str):
+def _cover_path(assets: str, filename_stem: str = None):
+    if filename_stem:
+        for prefix in (f"{filename_stem}_cover", filename_stem, f"cover_{filename_stem}"):
+            for ext in (".jpg", ".jpeg", ".png", ".webp"):
+                p = os.path.join(assets, f"{prefix}{ext}")
+                if os.path.exists(p):
+                    return p
     for n in ("cover.jpg", "cover.jpeg", "cover.png", "cover.webp"):
         p = os.path.join(assets, n)
         if os.path.exists(p):
@@ -254,15 +260,16 @@ IMG_COL_PLACEHOLDER_STYLE = ParagraphStyle(
 def draw_cover(canvas, doc, meta: dict, assets: str):
     canvas.saveState()
 
-    # 1. Fundo NAVY
-    canvas.setFillColor(NAVY)
-    canvas.rect(0, 0, W, H, fill=1, stroke=0)
-
-    # 2. Foto full-bleed
-    cover = _cover_path(assets)
+    cover = _cover_path(assets, meta.get("filename_stem"))
     if cover:
         canvas.drawImage(cover, 0, 0, width=W, height=H,
                          preserveAspectRatio=False, mask=_logo_mask(cover))
+        canvas.restoreState()
+        return
+
+    # 1. Fundo NAVY
+    canvas.setFillColor(NAVY)
+    canvas.rect(0, 0, W, H, fill=1, stroke=0)
 
     # 3. Triângulo NAVY — recorte sup-esq
     canvas.setFillColor(NAVY)
@@ -704,9 +711,13 @@ def extract_meta(md_path: str) -> dict:
 # ════════════════════════════════════════
 def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
     """
-    Build direto ao conteúdo — sem capa.
+    Build com página de capa e conteúdo interno.
     Margens ABNT ajustadas: Superior 3.5cm | Inferior 3.2cm (para evitar sobreposição)
     """
+    if not meta:
+        meta = {}
+    meta['filename_stem'] = os.path.splitext(os.path.basename(md_path))[0]
+
     doc = SimpleDocTemplate(
         output_path, pagesize=A4,
         leftMargin=3 * cm, rightMargin=2 * cm,
@@ -716,13 +727,13 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
 
     story = parse_md(md_path, assets_dir, meta)
 
-    # Adiciona a página de capa em branco (totalmente branca) no início
+    # Adiciona a página de capa no início
     story.insert(0, PageBreak())
     story.insert(0, Spacer(1, 1))
 
     doc.build(
         story,
-        onFirstPage=lambda c, d: header_footer(c, d, assets_dir),
+        onFirstPage=lambda c, d: draw_cover(c, d, meta, assets_dir),
         onLaterPages=lambda c, d: header_footer(c, d, assets_dir),
     )
     print(f"  [OK] {os.path.basename(output_path)}")
