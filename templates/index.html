@@ -424,7 +424,7 @@ function renderMain() {
           <div style="display: flex; gap: 6px; align-items: center;">
             <button class="btn btn-gold btn-sm" onclick="downloadAllMds()" title="Baixar todos os arquivos Markdown do projeto em um ZIP (para Chatbots)">📦 Baixar ZIP</button>
             <button class="btn btn-primary btn-sm" onclick="document.getElementById('mdUp').click()">＋ Upload .md</button>
-            <input type="file" id="mdUp" accept=".md" style="display:none" onchange="uploadFile(this,'md')">
+            <input type="file" id="mdUp" accept=".md" multiple style="display:none" onchange="uploadFile(this,'md')">
           </div>
         </div>
         <p class="muted" style="margin-bottom:.6rem;">Selecione um arquivo Markdown abaixo para carregar no editor.</p>
