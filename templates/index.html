@@ -793,7 +793,8 @@ async function uploadFilesDirectly(files, kind) {
     let idx = 0;
     for (let fObj of files) {
       idx++;
-      updateUploadOverlayStatus(`Enviando (${idx}/${files.length}): ${fObj.name}...`);
+      const uploadName = fObj.targetName || fObj.name;
+      updateUploadOverlayStatus(`Enviando (${idx}/${files.length}): ${uploadName}...`);
       try {
         // 1. Tenta obter Signed URL do backend
         const resSig = await fetch("/api/upload/signed-url", {
@@ -801,7 +802,7 @@ async function uploadFilesDirectly(files, kind) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             project: proj,
-            filename: fObj.name,
+            filename: uploadName,
             contentType: fObj.type || "application/octet-stream",
             kind: kind
           })
@@ -842,12 +843,12 @@ async function uploadFilesDirectly(files, kind) {
           // Fallback: Firebase inactive or error. Standard upload via Flask
           const isVercel = window.location.hostname.endsWith('.vercel.app');
           if (isVercel && fObj.size > 4.5 * 1024 * 1024) {
-            toast(`❌ Arquivo ${fObj.name} excede o limite de 4.5MB da Vercel (sem Firebase).`, "error");
+            toast(`❌ Arquivo ${uploadName} excede o limite de 4.5MB da Vercel (sem Firebase).`, "error");
             continue;
           }
           
           const fd = new FormData();
-          fd.append("files", fObj);
+          fd.append("files", fObj, uploadName);
           const r = await fetch(`/api/upload/${encodeURIComponent(proj)}/${kind}`, {
             method: "POST",
             body: fd
@@ -857,7 +858,7 @@ async function uploadFilesDirectly(files, kind) {
           if (d.ok) {
             uploadSuccessCount += d.saved;
             if (kind === 'md' && files.length === 1) {
-              singleMdLoadedName = fObj.name;
+              singleMdLoadedName = uploadName;
             }
           } else {
             throw new Error(d.error || "Erro no upload tradicional");
@@ -865,7 +866,7 @@ async function uploadFilesDirectly(files, kind) {
         }
       } catch (err) {
         console.error(err);
-        toast(`❌ Erro no upload de ${fObj.name}: ${err.message}`, "error");
+        toast(`❌ Erro no upload de ${uploadName}: ${err.message}`, "error");
       }
     }
     
@@ -893,17 +894,23 @@ async function uploadFile(input, kind) {
 
 async function uploadCover(input) {
   if (!input.files || input.files.length === 0 || !proj) return;
-  const originalFile = input.files[0];
-  const ext = originalFile.name.substring(originalFile.name.lastIndexOf('.')).toLowerCase();
+  const files = Array.from(input.files);
   
-  let targetName = "cover" + ext;
-  if (file) {
-    const stem = file.substring(0, file.lastIndexOf('.'));
-    targetName = `${stem}_cover${ext}`;
+  if (files.length === 1) {
+    const originalFile = files[0];
+    const ext = originalFile.name.substring(originalFile.name.lastIndexOf('.')).toLowerCase();
+    
+    let targetName = "cover" + ext;
+    if (file) {
+      const stem = file.substring(0, file.lastIndexOf('.'));
+      targetName = `${stem}_cover${ext}`;
+    }
+    
+    originalFile.targetName = targetName;
+    await uploadFilesDirectly([originalFile], 'img');
+  } else {
+    await uploadFilesDirectly(files, 'img');
   }
-  
-  const coverFile = new File([originalFile], targetName, { type: originalFile.type });
-  await uploadFilesDirectly([coverFile], 'img');
   input.value = "";
 }
 
