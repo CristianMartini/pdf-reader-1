@@ -118,6 +118,10 @@ LAST_SYNCED = {}
 _CACHE = {}
 _CACHE_TTL = 300  # 5 minutes
 
+_HIERARCHY_CACHE = None
+_HIERARCHY_CACHE_TS = 0
+_HIERARCHY_CACHE_TTL = 300  # 5 minutes
+
 def _cache_get(key):
     if key in _CACHE and (time.time() - _CACHE[key]['ts']) < _CACHE_TTL:
         return _CACHE[key]['data']
@@ -127,10 +131,14 @@ def _cache_set(key, data):
     _CACHE[key] = {'data': data, 'ts': time.time()}
 
 def _cache_invalidate(*keys):
+    global _HIERARCHY_CACHE
+    _HIERARCHY_CACHE = None
     for k in keys:
         _CACHE.pop(k, None)
 
 def _cache_invalidate_prefix(prefix):
+    global _HIERARCHY_CACHE
+    _HIERARCHY_CACHE = None
     to_del = [k for k in _CACHE if k.startswith(prefix)]
     for k in to_del:
         del _CACHE[k]
@@ -287,54 +295,55 @@ def get_bucket():
     return bucket
 
 
-def firebase_list_modules() -> list[str]:
-    """List all modules (top-level folders under projects/)."""
+def _get_firebase_hierarchy():
+    global _HIERARCHY_CACHE, _HIERARCHY_CACHE_TS
+    now = time.time()
+    if _HIERARCHY_CACHE is not None and (now - _HIERARCHY_CACHE_TS) < _HIERARCHY_CACHE_TTL:
+        return _HIERARCHY_CACHE
+        
     b = get_bucket()
     if not b:
-        return []
-    cached = _cache_get('modules_list')
-    if cached is not None:
-        return cached
+        return {}
+        
+    tree = {}
     try:
-        blobs = b.list_blobs(prefix="projects/", delimiter="/")
-        list(blobs)
-        prefixes = blobs.prefixes
-        modules = []
-        for p in prefixes:
-            name = p.strip("/").split("/")[-1]
-            if name:
-                modules.append(name)
-        _cache_set('modules_list', modules)
-        return modules
+        blobs = b.list_blobs(prefix="projects/")
+        for blob in blobs:
+            parts = blob.name.split('/')
+            if len(parts) >= 3 and parts[0] == 'projects':
+                module = parts[1]
+                project = parts[2]
+                if not module or not project:
+                    continue
+                if module not in tree:
+                    tree[module] = set()
+                if project and not project.startswith('.') and project not in ('assets', 'covers'):
+                    tree[module].add(project)
+            elif len(parts) == 2 and parts[0] == 'projects':
+                module = parts[1]
+                if module and not module.startswith('.'):
+                    if module not in tree:
+                        tree[module] = set()
+                        
+        result = {m: sorted(list(pjs)) for m, pjs in tree.items()}
+        _HIERARCHY_CACHE = result
+        _HIERARCHY_CACHE_TS = now
+        return result
     except Exception as e:
-        print(f"❌ Firebase: Erro ao listar módulos: {e}")
-        return []
+        print(f"❌ Firebase: Erro ao carregar hierarquia: {e}")
+        return {}
+
+
+def firebase_list_modules() -> list[str]:
+    """List all modules (top-level folders under projects/)."""
+    tree = _get_firebase_hierarchy()
+    return sorted(list(tree.keys()))
 
 
 def firebase_list_projects(module: str) -> list[str]:
     """List all projects within a module."""
-    b = get_bucket()
-    if not b:
-        return []
-    cache_key = f'projects_list_{module}'
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
-    try:
-        prefix = f"projects/{secure_filename(module)}/"
-        blobs = b.list_blobs(prefix=prefix, delimiter="/")
-        list(blobs)
-        prefixes = blobs.prefixes
-        projects = []
-        for p in prefixes:
-            name = p.strip("/").split("/")[-1]
-            if name:
-                projects.append(name)
-        _cache_set(cache_key, projects)
-        return projects
-    except Exception as e:
-        print(f"❌ Firebase: Erro ao listar projetos do módulo {module}: {e}")
-        return []
+    tree = _get_firebase_hierarchy()
+    return tree.get(module, [])
 
 
 def _firebase_count_files(module: str, project_name: str) -> dict:
