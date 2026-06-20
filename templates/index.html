@@ -220,6 +220,87 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
   50% { left: 30%; width: 50%; }
   100% { left: 100%; width: 35%; }
 }
+/* Estilos para Módulos */
+.module-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.module-header {
+  padding: 8px 10px;
+  background: #eef3ff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+}
+.module-header:hover {
+  background: #e0e8ff;
+}
+.module-header.expanded {
+  border-bottom-color: var(--border);
+}
+.module-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--navy);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.module-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.module-header:hover .module-actions {
+  opacity: 1;
+}
+.module-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--navy);
+}
+.module-btn:hover {
+  background: rgba(1, 22, 65, 0.1);
+}
+.module-projects {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+}
+.new-project-inline {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.new-project-inline input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
 </style>
 </head>
 <body>
@@ -239,14 +320,15 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 
   <!-- ══ SIDEBAR PROJETOS ══ -->
   <aside class="sidebar">
-    <div>
-      <h3 style="margin-bottom:.6rem;">📁 Projetos</h3>
-      <div class="new-proj">
-        <input id="newProjName" placeholder="Nome do projeto..." onkeydown="if(event.key==='Enter')createProject()">
-        <button class="btn btn-gold btn-sm" onclick="createProject()">＋</button>
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <h3 style="margin-bottom:.2rem;font-size:0.75rem;">📁 Novo Módulo</h3>
+      <div class="new-proj" style="margin-bottom:.5rem;">
+        <input id="newModuleName" placeholder="Nome do módulo..." onkeydown="if(event.key==='Enter')createModule()">
+        <button class="btn btn-primary btn-sm" onclick="createModule()">＋</button>
       </div>
     </div>
-    <div id="projectList" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;"></div>
+    <h3 style="margin-bottom:.4rem;font-size:0.8rem;border-top:1px solid var(--border);padding-top:8px;">📚 Módulos e Projetos</h3>
+    <div id="moduleListArea" style="display:flex;flex-direction:column;gap:6px;overflow-y:auto;flex:1;"></div>
   </aside>
 
   <!-- ══ MAIN ══ -->
@@ -281,8 +363,11 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 </div>
 
 <script>
+let mod = null;    // modulo ativo
 let proj = null;   // projeto ativo
 let file = null;   // arquivo ativo
+let expandedModules = {}; // para rastrear quais módulos estão expandidos no accordion
+let projectsCache = {};   // cache local de projetos para cada módulo: { "modulo": [projects...] }
 let currentImagesList = []; // lista de imagens do projeto ativo
 let currentCoversList = []; // lista de capas do projeto ativo
 let _mdSig = "", _pdfSig = "", _imgSig = "";
@@ -302,39 +387,172 @@ function stopQueueProcessing() {
 }
 
 // ══ PROJETOS ══
-async function loadProjects() {
-  const r = await fetch("/api/projects");
+// ══ MÓDULOS & PROJETOS ══
+async function loadModules() {
+  const r = await fetch("/api/modules");
   const d = await r.json();
-  const el = document.getElementById("projectList");
-  el.innerHTML = d.projects.map(p => `
-    <div class="project-item ${p.name===proj?'active':''}" onclick="selectProject('${p.name}')">
-      <div class="proj-info">
-        <div class="proj-name">📂 ${p.name}</div>
-        <div class="proj-meta">${p.mds} doc${p.mds!==1?'s':''} • ${p.pdfs} PDF${p.pdfs!==1?'s':''}</div>
+  const el = document.getElementById("moduleListArea");
+  
+  let html = '';
+  for (const m of d.modules) {
+    const isExpanded = !!expandedModules[m.name];
+    
+    html += `
+      <div class="module-item">
+        <div class="module-header ${isExpanded?'expanded':''}" onclick="toggleModule('${m.name}')">
+          <div class="module-title">
+            <span>${isExpanded?'▼':'▶'}</span>
+            <span>📂 ${m.name}</span>
+          </div>
+          <div class="module-actions" onclick="event.stopPropagation()">
+            <button class="module-btn" onclick="renameModule('${m.name}')" title="Renomear módulo">✏️</button>
+            <button class="module-btn" onclick="deleteModule('${m.name}')" title="Excluir módulo">🗑️</button>
+          </div>
+        </div>
+        ${isExpanded ? `
+          <div class="module-projects">
+            ${renderModuleProjectsList(m.name)}
+            <div class="new-project-inline" onclick="event.stopPropagation()">
+              <input id="newProjName-${m.name}" placeholder="Novo projeto..." onkeydown="if(event.key==='Enter')createProject('${m.name}')">
+              <button class="btn btn-gold btn-sm" onclick="createProject('${m.name}')" style="padding:2px 8px;">＋</button>
+            </div>
+          </div>
+        ` : ''}
       </div>
-      <button class="proj-del" onclick="event.stopPropagation();deleteProject('${p.name}')" title="Excluir projeto">🗑</button>
-    </div>
-  `).join("") || '<p class="muted">Nenhum projeto ainda.</p>';
+    `;
+  }
+  
+  el.innerHTML = html || '<p class="muted">Nenhum módulo ainda.</p>';
 }
 
-async function createProject() {
-  const inp = document.getElementById("newProjName");
+function renderModuleProjectsList(moduleName) {
+  const projs = projectsCache[moduleName] || [];
+  return projs.map(p => `
+    <div class="project-item ${p.name===proj && moduleName===mod ? 'active' : ''}" onclick="selectProject('${moduleName}', '${p.name}')">
+      <div class="proj-info">
+        <div class="proj-name">📄 ${p.name}</div>
+        <div class="proj-meta">${p.mds} doc${p.mds!==1?'s':''} • ${p.pdfs} PDF${p.pdfs!==1?'s':''}</div>
+      </div>
+      <button class="proj-del" onclick="event.stopPropagation();deleteProject('${moduleName}', '${p.name}')" title="Excluir projeto">🗑</button>
+    </div>
+  `).join("") || '<p class="muted" style="font-size:0.75rem;padding:4px;">Nenhum projeto.</p>';
+}
+
+async function toggleModule(moduleName) {
+  if (expandedModules[moduleName]) {
+    delete expandedModules[moduleName];
+    loadModules();
+  } else {
+    expandedModules[moduleName] = true;
+    loadModules();
+    await refreshProjectsOfModule(moduleName);
+  }
+}
+
+async function refreshProjectsOfModule(moduleName) {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(moduleName)}`);
+    const d = await r.json();
+    projectsCache[moduleName] = d.projects;
+    loadModules();
+  } catch (e) {
+    console.error("Erro ao carregar projetos do módulo", e);
+  }
+}
+
+async function createModule() {
+  const inp = document.getElementById("newModuleName");
   const name = inp.value.trim();
   if (!name) return;
-  const r = await fetch("/api/projects", {
+  const r = await fetch("/api/modules", {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({name})
   });
   const d = await r.json();
-  if (d.ok) { inp.value=""; await loadProjects(); selectProject(d.name); }
-  else toast("❌ " + d.error, "error");
+  if (d.ok) {
+    inp.value = "";
+    expandedModules[d.name] = true;
+    await loadModules();
+    await refreshProjectsOfModule(d.name);
+  } else {
+    toast("❌ " + d.error, "error");
+  }
 }
 
-async function deleteProject(name) {
+async function renameModule(oldName) {
+  const newName = prompt("Digite o novo nome para o módulo:", oldName);
+  if (!newName || newName.trim() === "" || newName.trim() === oldName) return;
+  const r = await fetch(`/api/modules/${encodeURIComponent(oldName)}`, {
+    method: "PUT", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({name: newName.trim()})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    if (mod === oldName) {
+      mod = d.name;
+    }
+    if (expandedModules[oldName]) {
+      delete expandedModules[oldName];
+      expandedModules[d.name] = true;
+    }
+    if (projectsCache[oldName]) {
+      projectsCache[d.name] = projectsCache[oldName];
+      delete projectsCache[oldName];
+    }
+    await loadModules();
+    toast("✏️ Módulo renomeado");
+  } else {
+    toast("❌ " + d.error, "error");
+  }
+}
+
+async function deleteModule(moduleName) {
+  if (!confirm(`ATENÇÃO: Excluir o módulo "${moduleName}" e TODOS os seus projetos e arquivos? Esta ação não pode ser desfeita!`)) return;
+  const r = await fetch(`/api/modules/${encodeURIComponent(moduleName)}`, {method:"DELETE"});
+  const d = await r.json();
+  if (d.ok) {
+    if (mod === moduleName) {
+      mod = null;
+      proj = null;
+      file = null;
+      renderEmpty();
+    }
+    delete expandedModules[moduleName];
+    delete projectsCache[moduleName];
+    loadModules();
+    toast("🗑 Módulo removido");
+  } else {
+    toast("❌ " + d.error, "error");
+  }
+}
+
+async function createProject(moduleName) {
+  const inp = document.getElementById(`newProjName-${moduleName}`);
+  const name = inp.value.trim();
+  if (!name) return;
+  const r = await fetch(`/api/projects/${encodeURIComponent(moduleName)}`, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({name})
+  });
+  const d = await r.json();
+  if (d.ok) {
+    inp.value = "";
+    await refreshProjectsOfModule(moduleName);
+    selectProject(moduleName, d.name);
+  } else {
+    toast("❌ " + d.error, "error");
+  }
+}
+
+async function deleteProject(moduleName, name) {
   if (!confirm(`Excluir projeto "${name}" e todos os seus arquivos?`)) return;
-  await fetch(`/api/projects/${encodeURIComponent(name)}`, {method:"DELETE"});
-  if (proj === name) { proj=null; file=null; renderEmpty(); }
-  loadProjects();
+  await fetch(`/api/projects/${encodeURIComponent(moduleName)}/${encodeURIComponent(name)}`, {method:"DELETE"});
+  if (proj === name && mod === moduleName) {
+    proj = null;
+    file = null;
+    renderEmpty();
+  }
+  await refreshProjectsOfModule(moduleName);
   toast("🗑 Projeto removido");
 }
 
@@ -345,11 +563,14 @@ function renderEmpty() {
 }
 
 // ══ SELECIONAR PROJETO ══
-function selectProject(name) {
-  proj = name; file = null; _mdSig = ""; _pdfSig = ""; _imgSig = "";
+function selectProject(moduleName, name) {
+  mod = moduleName;
+  proj = name;
+  file = null;
+  _mdSig = ""; _pdfSig = ""; _imgSig = "";
   uploadQueue = []; // Limpa fila ao trocar de projeto
   isProcessingQueue = false;
-  loadProjects();
+  loadModules();
   renderMain();
 }
 
@@ -358,7 +579,7 @@ function renderMain() {
     <!-- HEADER DO PROJETO E MATÉRIA -->
     <div class="card full" style="display:flex; justify-content:space-between; align-items:center; gap:12px; padding: 0.8rem 1.3rem; background: linear-gradient(135deg, #fafcff, #f0f4ff); border-left: 4px solid var(--gold); border-radius: 12px; margin-bottom: 0.2rem;">
       <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <span style="font-weight:700; color:var(--navy); font-size:1.05rem;">Projeto: <span id="currentProjectName" style="color:var(--gold);">${proj}</span></span>
+        <span style="font-weight:700; color:var(--navy); font-size:1.05rem;">Módulo/Projeto: <span id="currentProjectName" style="color:var(--gold);">${mod} / ${proj}</span></span>
         <span style="color:var(--border);">|</span>
         <div style="display:flex; align-items:center; gap:6px;">
           <span style="font-weight:600; color:var(--navy); font-size:0.9rem;">Matéria Padrão:</span>
@@ -523,11 +744,11 @@ function renderMain() {
 
 // ══ MATÉRIA PADRÃO DO PROJETO ══
 async function loadProjectMateria() {
-  if (!proj) return;
+  if (!proj || !mod) return;
   const input = document.getElementById("projectMateriaInput");
   if (input) input.disabled = true;
   try {
-    const res = await fetch(`/api/projects/${encodeURIComponent(proj)}/materia`);
+    const res = await fetch(`/api/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/materia`);
     const data = await res.json();
     if (input) {
       input.value = data.materia || "";
@@ -539,11 +760,11 @@ async function loadProjectMateria() {
 }
 
 async function saveProjectMateria(materia) {
-  if (!proj) return;
+  if (!proj || !mod) return;
   const input = document.getElementById("projectMateriaInput");
   if (input) input.disabled = true;
   try {
-    const res = await fetch(`/api/projects/${encodeURIComponent(proj)}/materia`, {
+    const res = await fetch(`/api/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/materia`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ materia })
@@ -563,12 +784,12 @@ async function saveProjectMateria(materia) {
 }
 
 async function detectProjectMateria() {
-  if (!proj) return;
+  if (!proj || !mod) return;
   const input = document.getElementById("projectMateriaInput");
   if (input) input.disabled = true;
   toast("Buscando matéria nos arquivos do projeto...", "info");
   try {
-    const res = await fetch(`/api/projects/${encodeURIComponent(proj)}/materia/detect`, { method: "POST" });
+    const res = await fetch(`/api/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/materia/detect`, { method: "POST" });
     const data = await res.json();
     if (data.ok && data.materia) {
       if (input) input.value = data.materia;
@@ -587,8 +808,8 @@ async function detectProjectMateria() {
 
 // ══ ARQUIVOS ══
 async function loadFiles(force=false) {
-  if (!proj) return;
-  const url = `/api/files/${encodeURIComponent(proj)}` + (force ? "?force=true" : "");
+  if (!proj || !mod) return;
+  const url = `/api/files/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}` + (force ? "?force=true" : "");
   const r = await fetch(url);
   const d = await r.json();
 
@@ -614,7 +835,7 @@ async function loadFiles(force=false) {
       const safeF = f.replace(/'/g, "\\'").replace(/"/g, "&quot;");
       return `
         <div class="img-item"
-             data-img-url="/projects/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}"
+             data-img-url="/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/assets/${encodeURIComponent(f)}"
              data-img-name="${f}"
              onmouseenter="showImgPreview(event, this)"
              onmousemove="moveImgPreview(event)"
@@ -637,8 +858,8 @@ async function loadFiles(force=false) {
     document.getElementById("pdfList").innerHTML = d.pdfs.map(f => `
       <div class="pdf-item" style="width:min(100%,360px)">
         <span class="f-name">📑 ${f}</span>
-        <a href="/projects/${encodeURIComponent(proj)}/pdf/${encodeURIComponent(f)}" target="_blank" class="btn btn-primary btn-sm">Abrir</a>
-        <a href="/projects/${encodeURIComponent(proj)}/pdf/${encodeURIComponent(f)}" download class="btn btn-gold btn-sm">Baixar</a>
+        <a href="/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/pdf/${encodeURIComponent(f)}" target="_blank" class="btn btn-primary btn-sm">Abrir</a>
+        <a href="/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/pdf/${encodeURIComponent(f)}" download class="btn btn-gold btn-sm">Baixar</a>
         <button class="btn btn-danger btn-sm" onclick="delFile('pdf','${f}')">🗑</button>
       </div>`).join("") || '<p class="muted">Nenhum PDF gerado</p>';
     const c = d.pdfs.length;
@@ -648,7 +869,7 @@ async function loadFiles(force=false) {
 }
 
 async function downloadAllMds() {
-  if (!proj) {
+  if (!proj || !mod) {
     toast("Selecione um projeto primeiro", "error");
     return;
   }
@@ -659,7 +880,7 @@ async function downloadAllMds() {
     btn.innerHTML = "<span class='spinning'>⏳</span> Preparando...";
     toast("Preparando seu arquivo ZIP com os documentos...", "info");
     
-    const url = `/api/projects/${encodeURIComponent(proj)}/download-mds`;
+    const url = `/api/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/download-mds`;
     const res = await fetch(url);
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
@@ -685,7 +906,7 @@ async function downloadAllMds() {
 }
 
 async function downloadAllPdfs() {
-  if (!proj) {
+  if (!proj || !mod) {
     toast("Selecione um projeto primeiro", "error");
     return;
   }
@@ -696,7 +917,7 @@ async function downloadAllPdfs() {
     btn.innerHTML = "<span class='spinning'>⏳</span> Preparando...";
     toast("Preparando seu arquivo ZIP com todos os PDFs. Isso pode levar alguns segundos...", "info");
     
-    const url = `/api/projects/${encodeURIComponent(proj)}/download-pdfs`;
+    const url = `/api/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/download-pdfs`;
     const res = await fetch(url);
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
@@ -722,7 +943,7 @@ async function downloadAllPdfs() {
 }
 
 async function loadFile(filename) {
-  const r = await fetch(`/api/file/${encodeURIComponent(proj)}/${encodeURIComponent(filename)}`);
+  const r = await fetch(`/api/file/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/${encodeURIComponent(filename)}`);
   const d = await r.json();
   if (!d.ok) return;
   document.getElementById("ed").value = d.content;
@@ -735,7 +956,7 @@ async function loadFile(filename) {
 }
 
 async function saveFile() {
-  if (!proj) return;
+  if (!proj || !mod) return;
   if (!file) {
     const n = prompt("Nome do arquivo (ex: aula01.md):");
     if (!n) return;
@@ -744,7 +965,7 @@ async function saveFile() {
     document.getElementById("btnDel").style.display = "block";
   }
   const content = document.getElementById("ed").value;
-  const r = await fetch(`/api/save/${encodeURIComponent(proj)}`, {
+  const r = await fetch(`/api/save/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({filename: file, content})
   });
@@ -762,17 +983,17 @@ async function deleteCurrentFile() {
 }
 
 async function delFile(kind, filename) {
-  await fetch(`/api/delete/${encodeURIComponent(proj)}/${kind}/${encodeURIComponent(filename)}`, {method:"DELETE"});
+  await fetch(`/api/delete/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/${kind}/${encodeURIComponent(filename)}`, {method:"DELETE"});
   _mdSig = _pdfSig = _imgSig = "";
   loadFiles(true);
-  loadProjects();
+  await refreshProjectsOfModule(mod);
   toast("🗑 Removido");
 }
 
 async function clearImages() {
-  if (!proj) return;
+  if (!proj || !mod) return;
   if (!confirm('Excluir TODAS as imagens deste projeto?')) return;
-  const r = await fetch(`/api/clear-images/${encodeURIComponent(proj)}`, {method:"DELETE"});
+  const r = await fetch(`/api/clear-images/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {method:"DELETE"});
   const d = await r.json();
   if (d.ok) {
     toast("🗑 Todas as imagens removidas");
@@ -784,7 +1005,7 @@ async function clearImages() {
 }
 
 async function uploadFilesDirectly(files, kind) {
-  if (!files || !files.length || !proj) return 0;
+  if (!files || !files.length || !proj || !mod) return 0;
   
   let uploadSuccessCount = 0;
   let singleMdLoadedName = null;
@@ -803,6 +1024,7 @@ async function uploadFilesDirectly(files, kind) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            module: mod,
             project: proj,
             filename: uploadName,
             contentType: fObj.type || "application/octet-stream",
@@ -826,7 +1048,7 @@ async function uploadFilesDirectly(files, kind) {
           }
           
           // Confirm upload with backend so it downloads the file to the local container
-          const confirmRes = await fetch(`/api/upload/confirm/${encodeURIComponent(proj)}/${kind}`, {
+          const confirmRes = await fetch(`/api/upload/confirm/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/${kind}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ filename: dataSig.safe_name })
@@ -851,7 +1073,7 @@ async function uploadFilesDirectly(files, kind) {
           
           const fd = new FormData();
           fd.append("files", fObj, uploadName);
-          const r = await fetch(`/api/upload/${encodeURIComponent(proj)}/${kind}`, {
+          const r = await fetch(`/api/upload/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/${kind}`, {
             method: "POST",
             body: fd
           });
@@ -876,7 +1098,7 @@ async function uploadFilesDirectly(files, kind) {
       toast(`✅ ${uploadSuccessCount} arquivo(s) enviado(s)`, "success");
       _mdSig = _imgSig = ""; 
       await loadFiles(true); 
-      loadProjects();
+      await refreshProjectsOfModule(mod);
       if (kind === 'md' && files.length === 1 && singleMdLoadedName) {
         loadFile(singleMdLoadedName);
       }
@@ -888,14 +1110,14 @@ async function uploadFilesDirectly(files, kind) {
 }
 
 async function uploadFile(input, kind) {
-  if (!input.files.length || !proj) return;
+  if (!input.files.length || !proj || !mod) return;
   const files = Array.from(input.files);
   await uploadFilesDirectly(files, kind);
   input.value = "";
 }
 
 async function uploadCover(input) {
-  if (!input.files || input.files.length === 0 || !proj) return;
+  if (!input.files || input.files.length === 0 || !proj || !mod) return;
   const files = Array.from(input.files);
   await uploadFilesDirectly(files, 'cover');
   input.value = "";
@@ -903,7 +1125,7 @@ async function uploadCover(input) {
 
 // ══ GERAR PDF ══
 async function generatePDF() {
-  if (!proj) return;
+  if (!proj || !mod) return;
   if (!file) { toast("Selecione um arquivo primeiro","error"); return; }
   await saveFile();
   const btn = document.getElementById("btnGen");
@@ -913,14 +1135,14 @@ async function generatePDF() {
   log.innerHTML = "⏳ Gerando PDF..."; log.classList.add("on");
   const r = await fetch("/api/generate", {
     method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({project: proj, files:[file]})
+    body: JSON.stringify({module: mod, project: proj, files:[file]})
   });
   const d = await r.json();
   btn.innerHTML = "▶ Gerar PDF"; btn.disabled = false;
   if (d.ok && d.result?.length) {
     log.innerHTML += `\n<span class="ok">✅ ${d.result[0]} gerado!</span>`;
     toast("✅ PDF gerado!","success");
-    _pdfSig=""; loadFiles(true); loadProjects();
+    _pdfSig=""; loadFiles(true); await refreshProjectsOfModule(mod);
   } else {
     log.innerHTML += `\n<span class="err">❌ ${d.error||'Erro ao gerar'}</span>`;
     toast("❌ Falha ao gerar","error");
@@ -1176,7 +1398,7 @@ function preventNavigation(e) {
 
 // ══ FILA DE PROCESSAMENTO COM IA ══
 async function addFilesToQueue(input) {
-  if (!input.files.length || !proj) return;
+  if (!input.files.length || !proj || !mod) return;
   
   const files = Array.from(input.files);
   const filesToConfirm = [];
@@ -1195,6 +1417,7 @@ async function addFilesToQueue(input) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            module: mod,
             project: proj,
             filename: fObj.name,
             contentType: fObj.type || "application/octet-stream",
@@ -1237,7 +1460,7 @@ async function addFilesToQueue(input) {
     if (filesToConfirm.length > 0) {
       updateUploadOverlayStatus(`Processando no servidor... Aguarde a extração.`);
       try {
-        const confirmRes = await fetch(`/api/queue/confirm/${encodeURIComponent(proj)}`, {
+        const confirmRes = await fetch(`/api/queue/confirm/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ files: filesToConfirm })
@@ -1286,7 +1509,7 @@ async function addFilesToQueue(input) {
         
         try {
           updateUploadOverlayStatus(`Enviando e extraindo arquivos no servidor...`);
-          const r = await fetch(`/api/queue/upload/${encodeURIComponent(proj)}`, {
+          const r = await fetch(`/api/queue/upload/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
             method: "POST",
             body: fd
           });
@@ -1403,7 +1626,7 @@ async function removeFromQueue(idx) {
   if (!confirm(`Remover "${item.name}" da fila?`)) return;
   
   try {
-    const res = await fetch(`/api/queue/delete/${encodeURIComponent(proj)}`, {
+    const res = await fetch(`/api/queue/delete/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: item.safe_name })
@@ -1606,7 +1829,7 @@ async function processQueueItem(item) {
     if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
 
     // 2. Extrair Texto do arquivo via backend (rápido, <1s)
-    const resExtract = await fetch(`/api/queue/extract/${encodeURIComponent(proj)}`, {
+    const resExtract = await fetch(`/api/queue/extract/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: item.safe_name })
@@ -1665,7 +1888,7 @@ async function processQueueItem(item) {
         "\n⚠️ INSTRUÇÃO CRÍTICA DE PRESERVAÇÃO DE RESUMO/GUIA:\n" +
         "- O documento bruto fornecido é um RESUMO, CRONOGRAMA ou GUIA DE ESTUDOS.\n" +
         "- Não tente expandir este documento artificialmente para 2000 palavras nem criar uma aula teórica longa.\n" +
-        "- Preserve o formato conciso, objetivo e esquematizado do resumo original.\n" +
+        "- Preserve o formato conciso, objective e esquematizado do resumo original.\n" +
         "- Estruture com títulos e subtítulos claros, listas com traços e blocos '[BOX]' para conceitos fundamentais.\n" +
         "- Comece diretamente com '---' no cabeçalho YAML.\n\n";
     }
@@ -1689,7 +1912,7 @@ async function processQueueItem(item) {
     item.status_msg = "Salvando e sincronizando na nuvem...";
     renderQueue();
     
-    const resSave = await fetch(`/api/queue/save/${encodeURIComponent(proj)}`, {
+    const resSave = await fetch(`/api/queue/save/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1787,11 +2010,15 @@ async function reprocessQueueItem(idx) {
 // ══ AUTO-REFRESH ══
 setInterval(() => {
   if (isProcessingQueue) return; // Não atualiza enquanto a fila IA está processando
-  if (proj) loadFiles(true);
-  loadProjects();
+  if (proj && mod) {
+    loadFiles(true);
+    refreshProjectsOfModule(mod);
+  } else {
+    loadModules();
+  }
 }, 30000);
 
-loadProjects();
+loadModules();
 </script>
 </body>
 </html>

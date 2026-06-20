@@ -114,6 +114,28 @@ bucket = None
 _bucket_resolved = False
 LAST_SYNCED = {}
 
+# ── Cache System (write-through invalidation) ──
+_CACHE = {}
+_CACHE_TTL = 300  # 5 minutes
+
+def _cache_get(key):
+    if key in _CACHE and (time.time() - _CACHE[key]['ts']) < _CACHE_TTL:
+        return _CACHE[key]['data']
+    return None
+
+def _cache_set(key, data):
+    _CACHE[key] = {'data': data, 'ts': time.time()}
+
+def _cache_invalidate(*keys):
+    for k in keys:
+        _CACHE.pop(k, None)
+
+def _cache_invalidate_prefix(prefix):
+    to_del = [k for k in _CACHE if k.startswith(prefix)]
+    for k in to_del:
+        del _CACHE[k]
+
+
 def _parse_firebase_credentials() -> dict:
     raw_cred = os.environ.get("FIREBASE_CREDENTIALS")
     if not raw_cred:
@@ -265,32 +287,63 @@ def get_bucket():
     return bucket
 
 
-def firebase_list_projects() -> list[str]:
+def firebase_list_modules() -> list[str]:
+    """List all modules (top-level folders under projects/)."""
     b = get_bucket()
     if not b:
         return []
+    cached = _cache_get('modules_list')
+    if cached is not None:
+        return cached
     try:
         blobs = b.list_blobs(prefix="projects/", delimiter="/")
-        list(blobs) # Consume list to populate prefixes
+        list(blobs)
         prefixes = blobs.prefixes
-        projects = []
+        modules = []
         for p in prefixes:
-            name = p.split("/")[-2]
+            name = p.strip("/").split("/")[-1]
             if name:
-                projects.append(name)
-        return projects
+                modules.append(name)
+        _cache_set('modules_list', modules)
+        return modules
     except Exception as e:
-        print(f"❌ Firebase: Erro ao listar projetos: {e}")
+        print(f"❌ Firebase: Erro ao listar módulos: {e}")
         return []
 
 
-def _firebase_count_files(project_name: str) -> dict:
+def firebase_list_projects(module: str) -> list[str]:
+    """List all projects within a module."""
+    b = get_bucket()
+    if not b:
+        return []
+    cache_key = f'projects_list_{module}'
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        prefix = f"projects/{secure_filename(module)}/"
+        blobs = b.list_blobs(prefix=prefix, delimiter="/")
+        list(blobs)
+        prefixes = blobs.prefixes
+        projects = []
+        for p in prefixes:
+            name = p.strip("/").split("/")[-1]
+            if name:
+                projects.append(name)
+        _cache_set(cache_key, projects)
+        return projects
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao listar projetos do módulo {module}: {e}")
+        return []
+
+
+def _firebase_count_files(module: str, project_name: str) -> dict:
     """Count md and pdf files in a Firebase project WITHOUT downloading."""
     b = get_bucket()
     if not b:
         return {"mds": 0, "pdfs": 0}
     try:
-        prefix = f"projects/{project_name}/"
+        prefix = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/"
         blobs = list(b.list_blobs(prefix=prefix))
         mds = sum(1 for bl in blobs if bl.name.endswith(".md") and "/assets/" not in bl.name)
         pdfs = sum(1 for bl in blobs if bl.name.endswith(".pdf") and "/assets/" not in bl.name)
@@ -299,27 +352,28 @@ def _firebase_count_files(project_name: str) -> dict:
         return {"mds": 0, "pdfs": 0}
 
 
-def _sync_project_from_firebase(project_name: str, force: bool = False):
+def _sync_project_from_firebase(module: str, project_name: str, force: bool = False):
     b = get_bucket()
     if not b:
         return
         
     now = time.time()
-    last = LAST_SYNCED.get(project_name, 0)
+    sync_key = f"{module}/{project_name}"
+    last = LAST_SYNCED.get(sync_key, 0)
     
-    if not force and (now - last < 120):
+    if not force and (now - last < 300):
         return
         
     try:
-        prefix = f"projects/{project_name}/"
+        prefix = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/"
         blobs = b.list_blobs(prefix=prefix)
-        local_proj_dir = os.path.join(PROJECTS, project_name)
+        local_proj_dir = _pdir(module, project_name)
         
         for blob in blobs:
             if blob.name.endswith('/'):
                 continue
             
-            rel_path = os.path.relpath(blob.name, f"projects/{project_name}")
+            rel_path = os.path.relpath(blob.name, f"projects/{secure_filename(module)}/{secure_filename(project_name)}")
             
             # ATENÇÃO: Sincroniza localmente apenas markdowns, .keep e project_info.json.
             # Imagens e PDFs são armazenados na nuvem e baixados sob demanda.
@@ -337,24 +391,24 @@ def _sync_project_from_firebase(project_name: str, force: bool = False):
             blob.download_to_filename(local_file_path)
             print(f"📥 Firebase: Sincronizado {blob.name} -> {local_file_path}")
             
-        LAST_SYNCED[project_name] = now
+        LAST_SYNCED[sync_key] = now
     except Exception as e:
-        print(f"❌ Firebase: Erro ao sincronizar projeto {project_name}: {e}")
+        print(f"❌ Firebase: Erro ao sincronizar projeto {module}/{project_name}: {e}")
 
 
-def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = False):
+def _upload_file_to_firebase(module: str, project_name: str, filename: str, is_asset: bool = False):
     b = get_bucket()
     if not b:
         return
         
     try:
-        local_proj_dir = os.path.join(PROJECTS, project_name)
+        local_proj_dir = _pdir(module, project_name)
         if is_asset:
             local_path = os.path.join(local_proj_dir, "assets", filename)
-            blob_path = f"projects/{project_name}/assets/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/assets/{filename}"
         else:
             local_path = os.path.join(local_proj_dir, filename)
-            blob_path = f"projects/{project_name}/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/{filename}"
             
         if os.path.isfile(local_path):
             blob = b.blob(blob_path)
@@ -364,23 +418,23 @@ def _upload_file_to_firebase(project_name: str, filename: str, is_asset: bool = 
         print(f"❌ Firebase: Erro ao fazer upload de {filename}: {e}")
 
 
-def _upload_file_to_firebase_ex(project_name: str, filename: str, kind: str):
+def _upload_file_to_firebase_ex(module: str, project_name: str, filename: str, kind: str):
     """Upload with explicit kind (md, img, cover, etc.)."""
     b = get_bucket()
     if not b:
         return
 
     try:
-        local_proj_dir = os.path.join(PROJECTS, project_name)
+        local_proj_dir = _pdir(module, project_name)
         if kind == "img":
             local_path = os.path.join(local_proj_dir, "assets", filename)
-            blob_path = f"projects/{project_name}/assets/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/assets/{filename}"
         elif kind == "cover":
             local_path = os.path.join(local_proj_dir, "covers", filename)
-            blob_path = f"projects/{project_name}/covers/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/covers/{filename}"
         else:
             local_path = os.path.join(local_proj_dir, filename)
-            blob_path = f"projects/{project_name}/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/{filename}"
 
         if os.path.isfile(local_path):
             blob = b.blob(blob_path)
@@ -390,18 +444,18 @@ def _upload_file_to_firebase_ex(project_name: str, filename: str, kind: str):
         print(f"❌ Firebase: Erro ao fazer upload de {filename}: {e}")
 
 
-def _download_file_from_firebase(project_name: str, filename: str, is_asset: bool = False) -> bool:
+def _download_file_from_firebase(module: str, project_name: str, filename: str, is_asset: bool = False) -> bool:
     b = get_bucket()
     if not b:
         return False
     try:
-        local_proj_dir = os.path.join(PROJECTS, project_name)
+        local_proj_dir = _pdir(module, project_name)
         if is_asset:
             local_path = os.path.join(local_proj_dir, "assets", filename)
-            blob_path = f"projects/{project_name}/assets/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/assets/{filename}"
         else:
             local_path = os.path.join(local_proj_dir, filename)
-            blob_path = f"projects/{project_name}/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/{filename}"
             
         blob = b.blob(blob_path)
         if blob.exists():
@@ -414,13 +468,13 @@ def _download_file_from_firebase(project_name: str, filename: str, is_asset: boo
     return False
 
 
-def _download_cover_from_firebase(project_name: str, filename: str) -> bool:
+def _download_cover_from_firebase(module: str, project_name: str, filename: str) -> bool:
     b = get_bucket()
     if not b:
         return False
     try:
-        local_path = os.path.join(_cdir(project_name), filename)
-        blob_path = f"projects/{project_name}/covers/{filename}"
+        local_path = os.path.join(_cdir(module, project_name), filename)
+        blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/covers/{filename}"
         blob = b.blob(blob_path)
         if blob.exists():
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
@@ -432,18 +486,18 @@ def _download_cover_from_firebase(project_name: str, filename: str) -> bool:
     return False
 
 
-def _download_all_assets(project_name: str):
+def _download_all_assets(module: str, project_name: str):
     b = get_bucket()
     if not b:
         return
     try:
-        prefix = f"projects/{project_name}/assets/"
+        prefix = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/assets/"
         blobs = b.list_blobs(prefix=prefix)
-        local_adir = _adir(project_name)
+        local_adir = _adir(module, project_name)
         for blob in blobs:
             if blob.name.endswith('/'):
                 continue
-            rel_path = os.path.relpath(blob.name, f"projects/{project_name}/assets")
+            rel_path = os.path.relpath(blob.name, f"projects/{secure_filename(module)}/{secure_filename(project_name)}/assets")
             local_path = os.path.join(local_adir, rel_path)
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
             blob.download_to_filename(local_path)
@@ -453,13 +507,13 @@ def _download_all_assets(project_name: str):
 
     # Também baixa capas da pasta covers/
     try:
-        prefix_c = f"projects/{project_name}/covers/"
+        prefix_c = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/covers/"
         blobs_c = b.list_blobs(prefix=prefix_c)
-        local_cdir = _cdir(project_name)
+        local_cdir = _cdir(module, project_name)
         for blob in blobs_c:
             if blob.name.endswith('/'):
                 continue
-            rel_path = os.path.relpath(blob.name, f"projects/{project_name}/covers")
+            rel_path = os.path.relpath(blob.name, f"projects/{secure_filename(module)}/{secure_filename(project_name)}/covers")
             local_path = os.path.join(local_cdir, rel_path)
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
             blob.download_to_filename(local_path)
@@ -468,18 +522,18 @@ def _download_all_assets(project_name: str):
         print(f"❌ Firebase: Erro ao baixar covers para PDF gen: {e}")
 
 
-def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
+def _delete_file_from_firebase(module: str, project_name: str, filename: str, kind: str):
     b = get_bucket()
     if not b:
         return
         
     try:
         if kind == "img":
-            blob_path = f"projects/{project_name}/assets/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/assets/{filename}"
         elif kind == "cover":
-            blob_path = f"projects/{project_name}/covers/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/covers/{filename}"
         else:
-            blob_path = f"projects/{project_name}/{filename}"
+            blob_path = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/{filename}"
             
         blob = b.blob(blob_path)
         if blob.exists():
@@ -489,33 +543,41 @@ def _delete_file_from_firebase(project_name: str, filename: str, kind: str):
         print(f"❌ Firebase: Erro ao excluir {filename} do Firebase: {e}")
 
 
-def _delete_project_from_firebase(project_name: str):
+def _delete_project_from_firebase(module: str, project_name: str):
     """Exclui todos os blobs de um projeto no Firebase Storage."""
     b = get_bucket()
     if not b:
         return
     try:
-        prefix = f"projects/{project_name}/"
+        prefix = f"projects/{secure_filename(module)}/{secure_filename(project_name)}/"
         blobs = list(b.list_blobs(prefix=prefix))
         if blobs:
             for blob in blobs:
                 blob.delete()
-            print(f"🗑️ Firebase: Excluídos {len(blobs)} arquivos do projeto {project_name}")
+            print(f"🗑️ Firebase: Excluídos {len(blobs)} arquivos do projeto {module}/{project_name}")
         # Limpar cache de sincronização
-        LAST_SYNCED.pop(project_name, None)
+        sync_key = f"{module}/{project_name}"
+        LAST_SYNCED.pop(sync_key, None)
+        _cache_invalidate(f'projects_list_{module}', 'modules_list')
     except Exception as e:
-        print(f"❌ Firebase: Erro ao excluir projeto {project_name}: {e}")
+        print(f"❌ Firebase: Erro ao excluir projeto {module}/{project_name}: {e}")
 
 
 # ── Helpers ──
-def _pdir(project: str) -> str:
-    return os.path.join(PROJECTS, secure_filename(project))
+def _pdir(module: str, project: str) -> str:
+    return os.path.join(PROJECTS, secure_filename(module), secure_filename(project))
 
-def _adir(project: str) -> str:
-    return os.path.join(_pdir(project), "assets")
+def _adir(module: str, project: str) -> str:
+    return os.path.join(_pdir(module, project), "assets")
 
-def _cdir(project: str) -> str:
-    return os.path.join(_pdir(project), "covers")
+def _cdir(module: str, project: str) -> str:
+    return os.path.join(_pdir(module, project), "covers")
+
+def _mdir(module: str) -> str:
+    return os.path.join(PROJECTS, secure_filename(module))
+
+def _blob_prefix(module: str, project: str) -> str:
+    return f"projects/{secure_filename(module)}/{secure_filename(project)}/"
 
 
 # ════════════════════════════════════════
@@ -527,21 +589,133 @@ def index():
 
 
 # ════════════════════════════════════════
+# MÓDULOS (CURSOS)
+# ════════════════════════════════════════
+@app.route("/api/modules", methods=["GET"])
+def api_list_modules():
+    items = []
+    module_names = set()
+    remote_modules = firebase_list_modules()
+    for name in remote_modules:
+        module_names.add(name)
+    if os.path.isdir(PROJECTS):
+        for entry in os.scandir(PROJECTS):
+            if entry.is_dir() and not entry.name.startswith("."):
+                module_names.add(entry.name)
+    for name in sorted(module_names):
+        project_count = len(firebase_list_projects(name))
+        items.append({"name": name, "projects": project_count})
+    return jsonify(modules=items)
+
+
+@app.route("/api/modules", methods=["POST"])
+def api_create_module():
+    name = (request.json or {}).get("name", "").strip()
+    if not name:
+        return jsonify(ok=False, error="Nome inválido")
+    safe = secure_filename(name)
+    if not safe:
+        return jsonify(ok=False, error="Nome contém apenas caracteres inválidos")
+    md = _mdir(safe)
+    os.makedirs(md, exist_ok=True)
+    # Create .keep in Firebase to register the module
+    keep_path = os.path.join(md, ".keep")
+    try:
+        with open(keep_path, "w", encoding="utf-8") as f:
+            f.write("")
+        b = get_bucket()
+        if b:
+            blob = b.blob(f"projects/{safe}/.keep")
+            blob.upload_from_filename(keep_path)
+    except Exception as e:
+        print(f"⚠️ Firebase: Não foi possível subir o .keep do módulo: {e}")
+    _cache_invalidate('modules_list')
+    return jsonify(ok=True, name=safe)
+
+
+@app.route("/api/modules/<module>", methods=["DELETE"])
+def api_delete_module(module):
+    safe_mod = secure_filename(module)
+    # Delete all projects in module from Firebase
+    b = get_bucket()
+    if b:
+        try:
+            prefix = f"projects/{safe_mod}/"
+            blobs = list(b.list_blobs(prefix=prefix))
+            for blob in blobs:
+                blob.delete()
+            print(f"🗑️ Firebase: Excluídos {len(blobs)} arquivos do módulo {safe_mod}")
+        except Exception as e:
+            print(f"❌ Firebase: Erro ao excluir módulo {safe_mod}: {e}")
+    # Delete local
+    md = _mdir(safe_mod)
+    if os.path.isdir(md):
+        import stat
+        try:
+            def remove_readonly(func, path, excinfo):
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            shutil.rmtree(md, onerror=remove_readonly)
+        except Exception as e:
+            print(f"⚠️ Erro ao remover módulo local: {e}")
+    _cache_invalidate_prefix('projects_list_')
+    _cache_invalidate('modules_list')
+    return jsonify(ok=True)
+
+
+@app.route("/api/modules/<module>", methods=["PUT"])
+def api_rename_module(module):
+    new_name = (request.json or {}).get("name", "").strip()
+    if not new_name:
+        return jsonify(ok=False, error="Nome inválido")
+    safe_old = secure_filename(module)
+    safe_new = secure_filename(new_name)
+    if not safe_new:
+        return jsonify(ok=False, error="Nome contém apenas caracteres inválidos")
+    if safe_old == safe_new:
+        return jsonify(ok=True, name=safe_new)
+    b = get_bucket()
+    if b:
+        try:
+            old_prefix = f"projects/{safe_old}/"
+            blobs = list(b.list_blobs(prefix=old_prefix))
+            for blob in blobs:
+                new_path = blob.name.replace(f"projects/{safe_old}/", f"projects/{safe_new}/", 1)
+                b.rename_blob(blob, new_path)
+            print(f"✏️ Firebase: Renomeados {len(blobs)} blobs de {safe_old} para {safe_new}")
+        except Exception as e:
+            print(f"❌ Firebase: Erro ao renomear módulo: {e}")
+    # Rename local
+    old_dir = _mdir(safe_old)
+    new_dir = _mdir(safe_new)
+    if os.path.isdir(old_dir):
+        try:
+            os.rename(old_dir, new_dir)
+        except Exception as e:
+            print(f"⚠️ Erro ao renomear módulo local: {e}")
+    _cache_invalidate_prefix('projects_list_')
+    _cache_invalidate('modules_list')
+    return jsonify(ok=True, name=safe_new)
+
+
+# ════════════════════════════════════════
 # PROJETOS
 # ════════════════════════════════════════
-@app.route("/api/projects", methods=["GET"])
-def api_list_projects():
+@app.route("/api/projects/<module>", methods=["GET"])
+def api_list_projects(module):
     items = []
     project_names = set()
+    safe_mod = secure_filename(module)
     
     # 1. Get remote Firebase projects first (fast, single network call)
-    remote_projs = firebase_list_projects()
+    remote_projs = firebase_list_projects(safe_mod)
     for name in remote_projs:
         project_names.add(name)
         
     # 2. Get local projects & upload .keep if not on Firebase
-    if os.path.isdir(PROJECTS):
-        for entry in os.scandir(PROJECTS):
+    md = _mdir(safe_mod)
+    if os.path.isdir(md):
+        for entry in os.scandir(md):
             if entry.is_dir() and not entry.name.startswith("."):
                 project_names.add(entry.name)
                 # Se o projeto local ainda não existe no Firebase, cria/garante .keep e faz upload
@@ -551,18 +725,18 @@ def api_list_projects():
                         if not os.path.exists(keep_path):
                             with open(keep_path, "w", encoding="utf-8") as f:
                                 f.write("")
-                        _upload_file_to_firebase(entry.name, ".keep", is_asset=False)
+                        _upload_file_to_firebase(safe_mod, entry.name, ".keep", is_asset=False)
                     except Exception:
                         pass
     
     b = get_bucket()
     for name in sorted(project_names):
         if b:
-            counts = _firebase_count_files(name)
+            counts = _firebase_count_files(safe_mod, name)
             mds = counts["mds"]
             pdfs = counts["pdfs"]
         else:
-            pd = _pdir(name)
+            pd = _pdir(safe_mod, name)
             mds  = len(glob.glob(os.path.join(pd, "*.md")))
             pdfs = len(glob.glob(os.path.join(pd, "*.pdf")))
         items.append({"name": name, "mds": mds, "pdfs": pdfs})
@@ -570,34 +744,37 @@ def api_list_projects():
     return jsonify(projects=items)
 
 
-@app.route("/api/projects", methods=["POST"])
-def api_create_project():
+@app.route("/api/projects/<module>", methods=["POST"])
+def api_create_project(module):
     name = (request.json or {}).get("name", "").strip()
     if not name:
         return jsonify(ok=False, error="Nome inválido")
     safe = secure_filename(name)
+    safe_mod = secure_filename(module)
     if not safe:
         return jsonify(ok=False, error="Nome contém apenas caracteres inválidos")
-    pd = _pdir(safe)
+    pd = _pdir(safe_mod, safe)
     os.makedirs(pd, exist_ok=True)
-    os.makedirs(_adir(safe), exist_ok=True)
-    os.makedirs(_cdir(safe), exist_ok=True)
+    os.makedirs(_adir(safe_mod, safe), exist_ok=True)
+    os.makedirs(_cdir(safe_mod, safe), exist_ok=True)
     
     # Criar e fazer o upload do arquivo .keep para garantir persistência no Firebase Storage
     keep_path = os.path.join(pd, ".keep")
     try:
         with open(keep_path, "w", encoding="utf-8") as f:
             f.write("")
-        _upload_file_to_firebase(safe, ".keep", is_asset=False)
+        _upload_file_to_firebase(safe_mod, safe, ".keep", is_asset=False)
     except Exception as e:
         print(f"⚠️ Firebase: Não foi possível subir o .keep inicial: {e}")
+    _cache_invalidate(f'projects_list_{safe_mod}', 'modules_list')
         
     return jsonify(ok=True, name=safe)
 
 
-@app.route("/api/projects/<project>", methods=["DELETE"])
-def api_delete_project(project):
-    pd = _pdir(project)
+@app.route("/api/projects/<module>/<project>", methods=["DELETE"])
+def api_delete_project(module, project):
+    safe_mod = secure_filename(module)
+    pd = _pdir(safe_mod, project)
     if os.path.isdir(pd):
         import time
         import stat
@@ -605,7 +782,7 @@ def api_delete_project(project):
         # Renomeia a pasta para um diretório oculto antes de apagar para sumir da listagem imediatamente,
         # mesmo se a exclusão física falhar devido a bloqueios do Windows (arquivos abertos)
         deleted_name = f".deleted_{secure_filename(project)}_{int(time.time())}"
-        dp = os.path.join(PROJECTS, deleted_name)
+        dp = os.path.join(_mdir(safe_mod), deleted_name)
         try:
             os.rename(pd, dp)
             target_dir = dp
@@ -623,18 +800,19 @@ def api_delete_project(project):
             print(f"⚠️ Erro ao remover pasta do projeto local: {e}")
             
     # Exclui todos os arquivos do projeto no Firebase (mesmo que o diretório local não exista)
-    _delete_project_from_firebase(project)
+    _delete_project_from_firebase(safe_mod, project)
+    _cache_invalidate(f'projects_list_{safe_mod}', 'modules_list')
     return jsonify(ok=True)
 
 
 # ════════════════════════════════════════
 # ARQUIVOS DO PROJETO
 # ════════════════════════════════════════
-@app.route("/api/files/<project>")
-def api_files(project):
+@app.route("/api/files/<module>/<project>")
+def api_files(module, project):
     force = request.args.get("force", "").lower() == "true"
     # Sincroniza apenas markdowns do Firebase
-    _sync_project_from_firebase(project, force=force)
+    _sync_project_from_firebase(module, project, force=force)
     
     b = get_bucket()
     mds = []
@@ -644,7 +822,7 @@ def api_files(project):
     
     if b:
         try:
-            prefix = f"projects/{project}/"
+            prefix = f"projects/{secure_filename(module)}/{secure_filename(project)}/"
             blobs = list(b.list_blobs(prefix=prefix))
             # Ordena blobs pelo tempo de modificação (updated) decrescente
             blobs_sorted = sorted(blobs, key=lambda x: x.updated if x.updated else 0, reverse=True)
@@ -652,7 +830,7 @@ def api_files(project):
             for blob in blobs_sorted:
                 if blob.name.endswith('/'):
                     continue
-                rel_path = os.path.relpath(blob.name, f"projects/{project}")
+                rel_path = os.path.relpath(blob.name, f"projects/{secure_filename(module)}/{secure_filename(project)}")
                 # Normaliza separadores de caminho para barras normais (essencial no Windows)
                 rel_path = rel_path.replace('\\', '/')
                 if rel_path == ".keep":
@@ -678,13 +856,13 @@ def api_files(project):
             # Markdowns são exibidos ordenados alfabeticamente
             mds.sort()
         except Exception as e:
-            print(f"❌ Firebase: Erro ao listar arquivos de {project}: {e}")
+            print(f"❌ Firebase: Erro ao listar arquivos de {module}/{project}: {e}")
             
     # Fallback para listagem local caso o Firebase falhe
     if not mds and not imgs and not pdfs and not covers:
-        pd = _pdir(project)
-        ad = _adir(project)
-        cd = _cdir(project)
+        pd = _pdir(module, project)
+        ad = _adir(module, project)
+        cd = _cdir(module, project)
         mds  = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(pd, "*.md")))]
         imgs = [os.path.basename(p) for p in sorted(
             glob.glob(os.path.join(ad, "*.*")), key=os.path.getmtime, reverse=True
@@ -700,12 +878,11 @@ def api_files(project):
     return jsonify(mds=mds, imgs=imgs, pdfs=pdfs, covers=covers)
 
 
-
-@app.route("/api/file/<project>/<filename>")
-def api_get_file(project, filename):
+@app.route("/api/file/<module>/<project>/<filename>")
+def api_get_file(module, project, filename):
     # Força sincronização do arquivo individual caso tenha atualizado remoto
-    _sync_project_from_firebase(project)
-    path = os.path.join(_pdir(project), secure_filename(filename))
+    _sync_project_from_firebase(module, project)
+    path = os.path.join(_pdir(module, project), secure_filename(filename))
     if not os.path.isfile(path):
         return jsonify(ok=False, error="Arquivo não encontrado")
     from engine.template import extract_meta
@@ -715,8 +892,8 @@ def api_get_file(project, filename):
     return jsonify(ok=True, content=content, meta=meta)
 
 
-@app.route("/api/save/<project>", methods=["POST"])
-def api_save(project):
+@app.route("/api/save/<module>/<project>", methods=["POST"])
+def api_save(module, project):
     data     = request.json or {}
     filename = secure_filename(data.get("filename", ""))
     content  = data.get("content", "")
@@ -731,15 +908,15 @@ def api_save(project):
     return jsonify(ok=True)
 
 
-@app.route("/api/upload/<project>/<kind>", methods=["POST"])
-def api_upload(project, kind):
+@app.route("/api/upload/<module>/<project>/<kind>", methods=["POST"])
+def api_upload(module, project, kind):
     files    = request.files.getlist("files")
     if kind == "md":
-        dest_dir = _pdir(project)
+        dest_dir = _pdir(module, project)
     elif kind == "cover":
-        dest_dir = _cdir(project)
+        dest_dir = _cdir(module, project)
     else:
-        dest_dir = _adir(project)
+        dest_dir = _adir(module, project)
     os.makedirs(dest_dir, exist_ok=True)
     saved = 0
     for f in files:
@@ -748,7 +925,7 @@ def api_upload(project, kind):
             local_path = os.path.join(dest_dir, safe_name)
             f.save(local_path)
             # Upload para o Firebase
-            _upload_file_to_firebase_ex(project, safe_name, kind)
+            _upload_file_to_firebase_ex(module, project, safe_name, kind)
             saved += 1
             
             # Remove o arquivo local se for uma imagem ou PDF para economizar espaço
@@ -766,27 +943,31 @@ def api_upload_signed_url():
         return jsonify(ok=False, firebase_active=False, error="Firebase inativo ou não configurado")
 
     data = request.json or {}
+    module = data.get("module", "")
     project = data.get("project", "")
     filename = data.get("filename", "")
     content_type = data.get("contentType", "")
     kind = data.get("kind", "")
 
-    if not project or not filename or not kind:
+    if not project or not filename or not kind or not module:
         return jsonify(ok=False, error="Parâmetros inválidos")
 
     safe_name = secure_filename(filename)
     if not safe_name:
         return jsonify(ok=False, error="Nome de arquivo inválido")
 
+    safe_proj = secure_filename(project)
+    safe_mod = secure_filename(module)
+
     # Caminho do blob dependendo do tipo
     if kind == "md":
-        blob_path = f"projects/{secure_filename(project)}/{safe_name}"
+        blob_path = f"projects/{safe_mod}/{safe_proj}/{safe_name}"
     elif kind == "img":
-        blob_path = f"projects/{secure_filename(project)}/assets/{safe_name}"
+        blob_path = f"projects/{safe_mod}/{safe_proj}/assets/{safe_name}"
     elif kind == "cover":
-        blob_path = f"projects/{secure_filename(project)}/covers/{safe_name}"
+        blob_path = f"projects/{safe_mod}/{safe_proj}/covers/{safe_name}"
     elif kind == "queue":
-        blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+        blob_path = f"temp_queue/{safe_mod}/{safe_proj}/{safe_name}"
     else:
         return jsonify(ok=False, error="Tipo de upload inválido")
 
@@ -808,8 +989,8 @@ def api_upload_signed_url():
         return jsonify(ok=False, firebase_active=True, error=str(e))
 
 
-@app.route("/api/upload/confirm/<project>/<kind>", methods=["POST"])
-def api_upload_confirm(project, kind):
+@app.route("/api/upload/confirm/<module>/<project>/<kind>", methods=["POST"])
+def api_upload_confirm(module, project, kind):
     data = request.json or {}
     filename = secure_filename(data.get("filename", ""))
     
@@ -821,16 +1002,17 @@ def api_upload_confirm(project, kind):
         return jsonify(ok=False, error="Firebase não está ativo neste ambiente")
 
     safe_proj = secure_filename(project)
+    safe_mod = secure_filename(module)
     
     if kind == "md":
-        blob_path = f"projects/{safe_proj}/{filename}"
-        local_path = os.path.join(_pdir(safe_proj), filename)
+        blob_path = f"projects/{safe_mod}/{safe_proj}/{filename}"
+        local_path = os.path.join(_pdir(safe_mod, safe_proj), filename)
     elif kind == "img":
-        blob_path = f"projects/{safe_proj}/assets/{filename}"
-        local_path = os.path.join(_adir(safe_proj), filename)
+        blob_path = f"projects/{safe_mod}/{safe_proj}/assets/{filename}"
+        local_path = os.path.join(_adir(safe_mod, safe_proj), filename)
     elif kind == "cover":
-        blob_path = f"projects/{safe_proj}/covers/{filename}"
-        local_path = os.path.join(_cdir(safe_proj), filename)
+        blob_path = f"projects/{safe_mod}/{safe_proj}/covers/{filename}"
+        local_path = os.path.join(_cdir(safe_mod, safe_proj), filename)
     else:
         return jsonify(ok=False, error="Tipo inválido")
 
@@ -852,36 +1034,36 @@ def api_upload_confirm(project, kind):
         return jsonify(ok=False, error=str(e))
 
 
-@app.route("/api/delete/<project>/<kind>/<filename>", methods=["DELETE"])
-def api_delete_file(project, kind, filename):
+@app.route("/api/delete/<module>/<project>/<kind>/<filename>", methods=["DELETE"])
+def api_delete_file(module, project, kind, filename):
     filename = secure_filename(filename)
     if kind == "md":
-        path = os.path.join(_pdir(project), filename)
+        path = os.path.join(_pdir(module, project), filename)
     elif kind == "img":
-        path = os.path.join(_adir(project), filename)
+        path = os.path.join(_adir(module, project), filename)
     elif kind == "cover":
-        path = os.path.join(_cdir(project), filename)
+        path = os.path.join(_cdir(module, project), filename)
     elif kind == "pdf":
-        path = os.path.join(_pdir(project), filename)
+        path = os.path.join(_pdir(module, project), filename)
     else:
         return jsonify(ok=False, error="Tipo inválido")
     if os.path.isfile(path):
         os.remove(path)
     # Excluir do Firebase (mesmo que não exista localmente)
-    _delete_file_from_firebase(project, filename, kind)
+    _delete_file_from_firebase(module, project, filename, kind)
     return jsonify(ok=True)
 
 
-@app.route("/api/clear-images/<project>", methods=["DELETE"])
-def api_clear_images(project):
-    ad = _adir(project)
+@app.route("/api/clear-images/<module>/<project>", methods=["DELETE"])
+def api_clear_images(module, project):
+    ad = _adir(module, project)
     if os.path.isdir(ad):
         for f in os.listdir(ad):
             path = os.path.join(ad, f)
             if os.path.isfile(path):
                 os.remove(path)
                 # Excluir cada imagem do Firebase
-                _delete_file_from_firebase(project, f, "img")
+                _delete_file_from_firebase(module, project, f, "img")
         return jsonify(ok=True)
     return jsonify(ok=False, error="Projeto não encontrado")
 
@@ -892,9 +1074,12 @@ def api_clear_images(project):
 @app.route("/api/generate", methods=["POST"])
 def api_generate():
     data    = request.json or {}
+    module  = data.get("module", "")
     project = data.get("project", "")
     files   = data.get("files", [])
 
+    if not module:
+        return jsonify(ok=False, error="Selecione um módulo")
     if not project:
         return jsonify(ok=False, error="Selecione um projeto")
     if not files:
@@ -902,15 +1087,15 @@ def api_generate():
 
     from engine.template import build_from_md, extract_meta
 
-    pd      = _pdir(project)
-    ad      = _adir(project)
+    pd      = _pdir(module, project)
+    ad      = _adir(module, project)
     results = []
 
     try:
         # Sincroniza apenas markdowns do Firebase antes da geração
-        _sync_project_from_firebase(project, force=True)
+        _sync_project_from_firebase(module, project, force=True)
         # Pré-baixa todas as imagens (assets) necessárias para compilação local
-        _download_all_assets(project)
+        _download_all_assets(module, project)
 
         for fname in files:
             md_path     = os.path.join(pd, secure_filename(fname))
@@ -920,7 +1105,7 @@ def api_generate():
                 meta = extract_meta(md_path)
                 build_from_md(md_path, output_path, assets_dir=ad, meta=meta)
                 # Upload do PDF gerado para o Firebase
-                _upload_file_to_firebase(project, pdf_name, is_asset=False)
+                _upload_file_to_firebase(module, project, pdf_name, is_asset=False)
                 results.append(os.path.basename(output_path))
                 
                 # Remove o PDF local imediatamente após o upload para economizar espaço
@@ -941,7 +1126,7 @@ def api_generate():
         except Exception as ex:
             print(f"⚠️ Erro ao limpar assets temporários: {ex}")
         # Limpa também a pasta de covers temporários
-        cd = _cdir(project)
+        cd = _cdir(module, project)
         try:
             if os.path.isdir(cd):
                 shutil.rmtree(cd)
@@ -953,26 +1138,26 @@ def api_generate():
 # ════════════════════════════════════════
 # SERVIR PDFs E INSTRUÇÕES
 # ════════════════════════════════════════
-@app.route("/projects/<project>/pdf/<path:filename>")
-def serve_pdf(project, filename):
-    filepath = os.path.join(_pdir(project), filename)
+@app.route("/projects/<module>/<project>/pdf/<path:filename>")
+def serve_pdf(module, project, filename):
+    filepath = os.path.join(_pdir(module, project), filename)
     if not os.path.isfile(filepath):
-        _download_file_from_firebase(project, filename, is_asset=False)
-    return send_from_directory(_pdir(project), filename)
+        _download_file_from_firebase(module, project, filename, is_asset=False)
+    return send_from_directory(_pdir(module, project), filename)
 
-@app.route("/projects/<project>/assets/<path:filename>")
-def serve_asset(project, filename):
-    filepath = os.path.join(_adir(project), filename)
+@app.route("/projects/<module>/<project>/assets/<path:filename>")
+def serve_asset(module, project, filename):
+    filepath = os.path.join(_adir(module, project), filename)
     if not os.path.isfile(filepath):
-        _download_file_from_firebase(project, filename, is_asset=True)
-    return send_from_directory(_adir(project), filename)
+        _download_file_from_firebase(module, project, filename, is_asset=True)
+    return send_from_directory(_adir(module, project), filename)
 
-@app.route("/projects/<project>/covers/<path:filename>")
-def serve_cover(project, filename):
-    filepath = os.path.join(_cdir(project), filename)
+@app.route("/projects/<module>/<project>/covers/<path:filename>")
+def serve_cover(module, project, filename):
+    filepath = os.path.join(_cdir(module, project), filename)
     if not os.path.isfile(filepath):
-        _download_cover_from_firebase(project, filename)
-    return send_from_directory(_cdir(project), filename)
+        _download_cover_from_firebase(module, project, filename)
+    return send_from_directory(_cdir(module, project), filename)
 
 @app.route("/api/instrucoes-ia")
 def serve_ai_instructions():
@@ -1113,10 +1298,10 @@ def _extract_text_from_pdf(filepath: str) -> str:
 # ════════════════════════════════════════
 QUEUE_DIR = "/tmp/queue-uploads" if is_vercel() else os.path.join(BASE, "temp_queue_uploads")
 
-@app.route("/api/queue/upload/<project>", methods=["POST"])
-def api_queue_upload(project):
+@app.route("/api/queue/upload/<module>/<project>", methods=["POST"])
+def api_queue_upload(module, project):
     files = request.files.getlist("files")
-    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
     os.makedirs(project_queue_dir, exist_ok=True)
     
     uploaded_files = []
@@ -1146,7 +1331,7 @@ def api_queue_upload(project):
                     # Envia apenas o backup temporário de texto (.txt) para o Firebase
                     if b:
                         try:
-                            blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}.txt"
+                            blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}.txt"
                             blob = b.blob(blob_path)
                             blob.upload_from_filename(txt_filepath)
                             print(f"📤 Firebase: Backup temporário de texto concluído para {blob_path}")
@@ -1158,7 +1343,7 @@ def api_queue_upload(project):
                 # Arquivos MD ou TXT normais
                 if b:
                     try:
-                        blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                        blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}"
                         blob = b.blob(blob_path)
                         blob.upload_from_filename(filepath)
                         print(f"📤 Firebase: Backup temporário concluído para {blob_path}")
@@ -1174,8 +1359,8 @@ def api_queue_upload(project):
     return jsonify(ok=True, files=uploaded_files)
 
 
-@app.route("/api/queue/confirm/<project>", methods=["POST"])
-def api_queue_confirm(project):
+@app.route("/api/queue/confirm/<module>/<project>", methods=["POST"])
+def api_queue_confirm(module, project):
     data = request.json or {}
     files_info = data.get("files", [])
     
@@ -1187,7 +1372,8 @@ def api_queue_confirm(project):
         return jsonify(ok=False, error="Firebase não está ativo neste ambiente")
 
     safe_proj = secure_filename(project)
-    project_queue_dir = os.path.join(QUEUE_DIR, safe_proj)
+    safe_mod = secure_filename(module)
+    project_queue_dir = os.path.join(QUEUE_DIR, safe_mod, safe_proj)
     os.makedirs(project_queue_dir, exist_ok=True)
     
     confirmed_files = []
@@ -1202,8 +1388,8 @@ def api_queue_confirm(project):
         is_pdf = safe_name.lower().endswith(".pdf") or ext.lower() == "pdf"
         
         if is_pdf:
-            # O navegador fez upload direto do PDF binário para f"temp_queue/{safe_proj}/{safe_name}"
-            pdf_blob_path = f"temp_queue/{safe_proj}/{safe_name}"
+            # O navegador fez upload direto do PDF binário para f"temp_queue/{safe_mod}/{safe_proj}/{safe_name}"
+            pdf_blob_path = f"temp_queue/{safe_mod}/{safe_proj}/{safe_name}"
             pdf_filepath = os.path.join(project_queue_dir, safe_name)
             txt_filepath = pdf_filepath + ".txt"
             
@@ -1246,7 +1432,7 @@ def api_queue_confirm(project):
                 print(f"❌ Firebase: Erro ao confirmar e converter PDF {safe_name}: {e}")
         else:
             # Arquivos comuns (.md, .txt)
-            blob_path = f"temp_queue/{safe_proj}/{safe_name}"
+            blob_path = f"temp_queue/{safe_mod}/{safe_proj}/{safe_name}"
             filepath = os.path.join(project_queue_dir, safe_name)
             try:
                 blob = b.blob(blob_path)
@@ -1265,8 +1451,8 @@ def api_queue_confirm(project):
 
 
 
-@app.route("/api/queue/extract/<project>", methods=["POST"])
-def api_queue_extract(project):
+@app.route("/api/queue/extract/<module>/<project>", methods=["POST"])
+def api_queue_extract(module, project):
     data = request.json or {}
     safe_name = secure_filename(data.get("filename", ""))
     
@@ -1276,7 +1462,7 @@ def api_queue_extract(project):
     ext = os.path.splitext(safe_name)[1].lower()
     is_pdf = ext == ".pdf"
     
-    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
     filepath = os.path.join(project_queue_dir, safe_name)
     if is_pdf:
         filepath += ".txt"
@@ -1284,7 +1470,7 @@ def api_queue_extract(project):
     b = get_bucket()
     if not os.path.isfile(filepath) and b:
         try:
-            blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+            blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}"
             if is_pdf:
                 blob_path += ".txt"
             blob = b.blob(blob_path)
@@ -1410,8 +1596,8 @@ def api_debug_firebase():
     return jsonify(info)
 
 
-@app.route("/api/queue/save/<project>", methods=["POST"])
-def api_queue_save(project):
+@app.route("/api/queue/save/<module>/<project>", methods=["POST"])
+def api_queue_save(module, project):
 
     data = request.json or {}
     safe_name = secure_filename(data.get("filename", ""))
@@ -1423,17 +1609,17 @@ def api_queue_save(project):
     try:
         # Salva como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"
-        dest_path = os.path.join(_pdir(project), dest_filename)
+        dest_path = os.path.join(_pdir(module, project), dest_filename)
         
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "w", encoding="utf-8") as f:
             f.write(content)
             
         # Upload do novo markdown gerado para o Firebase
-        _upload_file_to_firebase(project, dest_filename, is_asset=False)
+        _upload_file_to_firebase(module, project, dest_filename, is_asset=False)
         
         # Limpar arquivo temporário local e no Firebase Storage
-        project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+        project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
         is_pdf = safe_name.lower().endswith(".pdf")
         filepath = os.path.join(project_queue_dir, safe_name)
         if is_pdf:
@@ -1448,7 +1634,7 @@ def api_queue_save(project):
         b = get_bucket()
         if b:
             try:
-                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}"
                 if is_pdf:
                     blob_path += ".txt"
                 blob = b.blob(blob_path)
@@ -1464,8 +1650,8 @@ def api_queue_save(project):
         return jsonify(ok=False, error=str(e))
 
 
-@app.route("/api/queue/delete/<project>", methods=["POST"])
-def api_queue_delete(project):
+@app.route("/api/queue/delete/<module>/<project>", methods=["POST"])
+def api_queue_delete(module, project):
     data = request.json or {}
     safe_name = secure_filename(data.get("filename", ""))
     
@@ -1474,7 +1660,7 @@ def api_queue_delete(project):
         
     try:
         # 1. Limpar arquivo temporário local
-        project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+        project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
         is_pdf = safe_name.lower().endswith(".pdf")
         filepath = os.path.join(project_queue_dir, safe_name)
         if is_pdf:
@@ -1490,7 +1676,7 @@ def api_queue_delete(project):
         b = get_bucket()
         if b:
             try:
-                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}"
                 if is_pdf:
                     blob_path += ".txt"
                 blob = b.blob(blob_path)
@@ -1506,15 +1692,15 @@ def api_queue_delete(project):
         return jsonify(ok=False, error=str(e))
 
 
-@app.route("/api/queue/process/<project>", methods=["POST"])
-def api_queue_process(project):
+@app.route("/api/queue/process/<module>/<project>", methods=["POST"])
+def api_queue_process(module, project):
     data = request.json or {}
     safe_name = secure_filename(data.get("filename", ""))
     
     if not safe_name:
         return jsonify(ok=False, error="Nome de arquivo inválido")
         
-    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
     ext = os.path.splitext(safe_name)[1].lower()
     is_pdf = ext == ".pdf"
     
@@ -1529,7 +1715,7 @@ def api_queue_process(project):
     if not os.path.isfile(filepath):
         if b:
             try:
-                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}"
                 if is_pdf:
                     blob_path += ".txt"
                 blob = b.blob(blob_path)
@@ -1550,13 +1736,13 @@ def api_queue_process(project):
         with open(filepath, "r", encoding="utf-8") as f:
             raw_text = f.read()
             
-        materia = _get_project_materia(project)
+        materia = _get_project_materia(module, project)
         rewritten_markdown = process_content_to_style(raw_text, is_pdf=False, filename=safe_name, materia=materia)
         rewritten_markdown = override_materia_in_markdown(rewritten_markdown, materia)
         
         # 3. Salvar como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"
-        dest_path = os.path.join(_pdir(project), dest_filename)
+        dest_path = os.path.join(_pdir(module, project), dest_filename)
         
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "w", encoding="utf-8") as f:
@@ -1602,16 +1788,17 @@ def api_queue_process(project):
 
 
 
-@app.route("/api/projects/<project>/download-mds")
-def api_download_project_mds(project):
+@app.route("/api/projects/<module>/<project>/download-mds")
+def api_download_project_mds(module, project):
     import io
     import zipfile
     from flask import send_file
 
     safe_proj = secure_filename(project)
-    _sync_project_from_firebase(safe_proj)
+    safe_mod = secure_filename(module)
+    _sync_project_from_firebase(safe_mod, safe_proj)
     
-    pd = _pdir(safe_proj)
+    pd = _pdir(safe_mod, safe_proj)
     md_files = glob.glob(os.path.join(pd, "*.md"))
     
     if not md_files:
@@ -1633,19 +1820,20 @@ def api_download_project_mds(project):
     )
 
 
-@app.route("/api/projects/<project>/download-pdfs")
-def api_download_project_pdfs(project):
+@app.route("/api/projects/<module>/<project>/download-pdfs")
+def api_download_project_pdfs(module, project):
     import io
     import zipfile
     from flask import send_file
 
     safe_proj = secure_filename(project)
+    safe_mod = secure_filename(module)
     
     b = get_bucket()
     if not b:
         return jsonify(ok=False, error="Firebase inativo ou não configurado")
         
-    prefix = f"projects/{safe_proj}/"
+    prefix = f"projects/{safe_mod}/{safe_proj}/"
     blobs = b.list_blobs(prefix=prefix)
     
     memory_file = io.BytesIO()
@@ -1676,14 +1864,14 @@ def api_download_project_pdfs(project):
 # ════════════════════════════════════════
 # PADRONIZAÇÃO DE MATÉRIA
 # ════════════════════════════════════════
-def _project_info_path(project):
-    return os.path.join(_pdir(project), "project_info.json")
+def _project_info_path(module, project):
+    return os.path.join(_pdir(module, project), "project_info.json")
 
-def _get_project_materia(project):
+def _get_project_materia(module, project):
     # Força a sincronização antes de ler a matéria (importante para ambientes como Vercel)
-    _sync_project_from_firebase(project)
+    _sync_project_from_firebase(module, project)
     
-    info_path = _project_info_path(project)
+    info_path = _project_info_path(module, project)
     if os.path.isfile(info_path):
         try:
             with open(info_path, "r", encoding="utf-8") as f:
@@ -1695,7 +1883,7 @@ def _get_project_materia(project):
             pass
             
     # Fallback 1: Verifica nos markdowns existentes
-    pd = _pdir(project)
+    pd = _pdir(module, project)
     md_files = glob.glob(os.path.join(pd, "*.md"))
     md_files.sort(key=os.path.getmtime, reverse=True)
     
@@ -1705,7 +1893,7 @@ def _get_project_materia(project):
             meta = extract_meta(md_path)
             m = meta.get("materia", "").strip()
             if m and m.lower() != "disciplina":
-                _save_project_info(project, {"materia": m})
+                _save_project_info(module, project, {"materia": m})
                 return m
         except Exception:
             pass
@@ -1713,11 +1901,11 @@ def _get_project_materia(project):
     # Fallback 2: Adivinha a partir do nome do projeto
     guessed = project.replace("_", " ").replace("-", " ").strip()
     guessed = " ".join(word.capitalize() for word in guessed.split())
-    _save_project_info(project, {"materia": guessed})
+    _save_project_info(module, project, {"materia": guessed})
     return guessed
 
-def _save_project_info(project, data):
-    info_path = _project_info_path(project)
+def _save_project_info(module, project, data):
+    info_path = _project_info_path(module, project)
     existing = {}
     if os.path.isfile(info_path):
         try:
@@ -1731,13 +1919,13 @@ def _save_project_info(project, data):
         with open(info_path, "w", encoding="utf-8") as f:
             json.dump(existing, f, ensure_ascii=False, indent=2)
         # Upload do project_info.json atualizado para o Firebase
-        _upload_file_to_firebase(project, "project_info.json", is_asset=False)
+        _upload_file_to_firebase(module, project, "project_info.json", is_asset=False)
     except Exception as e:
         print(f"Erro ao salvar project_info.json: {e}")
 
-def _detect_project_materia_backend(project):
+def _detect_project_materia_backend(module, project):
     # 1. Busca primeiro nos MDs existentes
-    pd = _pdir(project)
+    pd = _pdir(module, project)
     md_files = glob.glob(os.path.join(pd, "*.md"))
     md_files.sort(key=os.path.getmtime, reverse=True)
     from engine.template import extract_meta
@@ -1751,7 +1939,7 @@ def _detect_project_materia_backend(project):
             pass
 
     # 2. Busca amostra de texto dos PDFs na fila temporária ou no diretório do projeto
-    queue_dir = os.path.join(QUEUE_DIR, secure_filename(project))
+    queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
     txt_files = glob.glob(os.path.join(queue_dir, "*.txt"))
     txt_files += glob.glob(os.path.join(pd, "*.txt"))
     
@@ -1839,34 +2027,80 @@ def override_materia_in_markdown(markdown_content: str, materia: str) -> str:
         fm = f"---\ntitle: {title}\naula: 01\nmateria: {materia}\n---\n\n"
         return fm + markdown_content
 
-@app.route("/api/projects/<project>/materia", methods=["GET"])
-def api_get_project_materia(project):
+@app.route("/api/projects/<module>/<project>/materia", methods=["GET"])
+def api_get_project_materia(module, project):
     try:
-        materia = _get_project_materia(project)
+        materia = _get_project_materia(module, project)
         return jsonify(ok=True, materia=materia)
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
-@app.route("/api/projects/<project>/materia", methods=["POST"])
-def api_save_project_materia(project):
+@app.route("/api/projects/<module>/<project>/materia", methods=["POST"])
+def api_save_project_materia(module, project):
     data = request.json or {}
     materia = data.get("materia", "").strip()
     if not materia:
         return jsonify(ok=False, error="Nome de matéria inválido")
     try:
-        _save_project_info(project, {"materia": materia})
+        _save_project_info(module, project, {"materia": materia})
         return jsonify(ok=True)
     except Exception as e:
         return jsonify(ok=False, error=str(e))
 
-@app.route("/api/projects/<project>/materia/detect", methods=["POST"])
-def api_detect_project_materia(project):
+@app.route("/api/projects/<module>/<project>/materia/detect", methods=["POST"])
+def api_detect_project_materia(module, project):
     try:
-        detected = _detect_project_materia_backend(project)
-        _save_project_info(project, {"materia": detected})
+        detected = _detect_project_materia_backend(module, project)
+        _save_project_info(module, project, {"materia": detected})
         return jsonify(ok=True, materia=detected)
     except Exception as e:
         return jsonify(ok=False, error=str(e))
+
+
+@app.route("/api/migrate", methods=["POST"])
+def api_migrate():
+    target_module = "pericia-criminal"
+    target_module_dir = os.path.join(PROJECTS, target_module)
+    os.makedirs(target_module_dir, exist_ok=True)
+    
+    migrated_local = []
+    if os.path.isdir(PROJECTS):
+        for entry in os.scandir(PROJECTS):
+            if entry.is_dir() and not entry.name.startswith(".") and entry.name != target_module:
+                src = entry.path
+                dst = os.path.join(target_module_dir, entry.name)
+                try:
+                    shutil.move(src, dst)
+                    migrated_local.append(entry.name)
+                except Exception as e:
+                    print(f"Error migrating local project {entry.name}: {e}")
+                    
+    b = get_bucket()
+    migrated_firebase = []
+    if b:
+        try:
+            blobs = list(b.list_blobs(prefix="projects/"))
+            for blob in blobs:
+                parts = blob.name.split('/')
+                # parts should be: ['projects', 'project_name', ...]
+                if len(parts) >= 3 and parts[0] == 'projects' and parts[1] != target_module:
+                    # check if the prefix parts[1] is already in a subdirectory (avoid double migration if path has more structure)
+                    # if parts[1] has no subfolders but files, it's a project
+                    project_name = parts[1]
+                    new_parts = ['projects', target_module] + parts[1:]
+                    new_name = '/'.join(new_parts)
+                    try:
+                        b.rename_blob(blob, new_name)
+                        migrated_firebase.append(blob.name)
+                    except Exception as e:
+                        print(f"Error renaming blob {blob.name} to {new_name}: {e}")
+        except Exception as e:
+            print(f"Error migrating Firebase blobs: {e}")
+            
+    _cache_invalidate_prefix('projects_list_')
+    _cache_invalidate('modules_list')
+    
+    return jsonify(ok=True, local=migrated_local, firebase=migrated_firebase)
 
 
 # ════════════════════════════════════════
