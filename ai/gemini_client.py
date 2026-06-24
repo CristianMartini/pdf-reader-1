@@ -358,7 +358,7 @@ def review_and_polish_markdown(draft_markdown: str, model: str = None) -> str:
         "Faça o mesmo para as tags de imagem: `[IMG:nome.jpg]` deve se tornar apenas [IMG:nome.jpg] sem crases. "
         "Se houver uma descrição em parênteses na mesma linha da tag de imagem, mantenha-a (ex: [IMG:cadaver.png] (descrição)).\n"
         "5. LEGENDAS DE IMAGEM: A descrição/sugestão do tipo de imagem deve constar exclusivamente entre parênteses e na mesma linha da tag (ex: `[IMG:esquema.png] (Diagrama comparativo X e Y)`). Remova qualquer legenda de imagem, descrição ou nota explicativa em itálico/negrito gerada automaticamente nas linhas abaixo ou acima das tags de imagem.\n"
-        "6. NÃO ALUCINE: Mantenha todo o conteúdo didático, técnico, exercícios e formatação de cabeçalho YAML intactos. Apenas lapide a escrita e corrija as falhas de formatação/junção.\n"
+        "6. PRESERVAÇÃO E COESÃO: Mantenha a formatação do cabeçalho YAML e os exercícios intactos. Garanta que as inovações e atualizações científicas adicionadas no rascunho façam sentido lógico e transicionem suavemente com o conteúdo original, sem inventar conceitos irreais (evite alucinações técnicas).\n"
         "7. PROIBIÇÃO DE BLOCKQUOTES (>): Nunca use o caractere '>' no início de linhas para citações ou destaques. Se o rascunho contiver blockquotes (ex: '> texto'), remova obrigatoriamente o caractere '>' e transforme-o em texto normal ou coloque dentro de um bloco [BOX] se for muito importante.\n"
         "8. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica.\n\n"
         f"RASCUNHO A SER REVISADO:\n{draft_markdown}"
