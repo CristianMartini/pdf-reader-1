@@ -908,12 +908,12 @@ def api_save(module, project):
     content  = data.get("content", "")
     if not filename:
         return jsonify(ok=False, error="Nome de arquivo inválido")
-    pd = _pdir(project)
+    pd = _pdir(module, project)
     os.makedirs(pd, exist_ok=True)
     with open(os.path.join(pd, filename), "w", encoding="utf-8") as f:
         f.write(content)
     # Upload para o Firebase
-    _upload_file_to_firebase(project, filename, is_asset=False)
+    _upload_file_to_firebase(module, project, filename, is_asset=False)
     return jsonify(ok=True)
 
 
@@ -1541,7 +1541,7 @@ def api_config_gemini():
         "Faça o mesmo para as tags de imagem: `[IMG:nome.jpg]` deve se tornar apenas [IMG:nome.jpg] sem crases. "
         "Se houver uma descrição em parênteses na mesma linha da tag de imagem, mantenha-a (ex: [IMG:cadaver.png] (descrição)).\n"
         "5. LEGENDAS DE IMAGEM: A descrição/sugestão do tipo de imagem deve constar exclusivamente entre parênteses e na mesma linha da tag (ex: `[IMG:esquema.png] (Diagrama comparativo X e Y)`). Remova qualquer legenda de imagem, descrição ou nota explicativa em itálico/negrito gerada automaticamente nas linhas abaixo ou acima das tags de imagem.\n"
-        "6. NÃO ALUCINE: Mantenha todo o conteúdo didático, técnico, exercícios e formatação de cabeçalho YAML intactos. Apenas lapide a escrita e corrija as falhas de formatação/junção.\n"
+        "6. PRESERVAÇÃO E COESÃO: Mantenha a formatação do cabeçalho YAML e os exercícios intactos. Garanta que as inovações e atualizações científicas adicionadas no rascunho façam sentido lógico e transicionem suavemente com o conteúdo original, sem inventar conceitos irreais (evite alucinações técnicas).\n"
         "7. PROIBIÇÃO DE BLOCKQUOTES (>): Nunca use o caractere '>' no início de linhas para citações ou destaques. Se o rascunho contiver blockquotes (ex: '> texto'), remova obrigatoriamente o caractere '>' e transforme-o em texto normal ou coloque dentro de um bloco [BOX] se for muito importante.\n"
         "8. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
     )
@@ -1758,7 +1758,7 @@ def api_queue_process(module, project):
             f.write(rewritten_markdown)
             
         # Upload do novo markdown gerado pela IA para o Firebase
-        _upload_file_to_firebase(project, dest_filename, is_asset=False)
+        _upload_file_to_firebase(module, project, dest_filename, is_asset=False)
             
         # 4. Limpar arquivo temporário local e backup no Firebase
         try:
@@ -1768,7 +1768,7 @@ def api_queue_process(module, project):
             
         if b:
             try:
-                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}"
                 if is_pdf:
                     blob_path += ".txt"
                 blob = b.blob(blob_path)
@@ -1785,7 +1785,7 @@ def api_queue_process(module, project):
         # Garante que removemos os backups do Firebase mesmo em caso de erro no processamento
         if b:
             try:
-                blob_path = f"temp_queue/{secure_filename(project)}/{safe_name}"
+                blob_path = f"temp_queue/{secure_filename(module)}/{secure_filename(project)}/{safe_name}"
                 if is_pdf:
                     blob_path += ".txt"
                 blob = b.blob(blob_path)
@@ -1907,8 +1907,10 @@ def _get_project_materia(module, project):
         except Exception:
             pass
             
-    # Fallback 2: Adivinha a partir do nome do projeto
-    guessed = project.replace("_", " ").replace("-", " ").strip()
+    # Fallback 2: Adivinha a partir do nome do projeto (limpo sem números no início)
+    import re
+    cleaned = re.sub(r'^\d+\s*[-_]+\s*', '', project)
+    guessed = cleaned.replace("_", " ").replace("-", " ").strip()
     guessed = " ".join(word.capitalize() for word in guessed.split())
     _save_project_info(module, project, {"materia": guessed})
     return guessed
@@ -1947,48 +1949,10 @@ def _detect_project_materia_backend(module, project):
         except Exception:
             pass
 
-    # 2. Busca amostra de texto dos PDFs na fila temporária ou no diretório do projeto
-    queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
-    txt_files = glob.glob(os.path.join(queue_dir, "*.txt"))
-    txt_files += glob.glob(os.path.join(pd, "*.txt"))
-    
-    raw_text_sample = ""
-    for txt_path in txt_files:
-        try:
-            with open(txt_path, "r", encoding="utf-8") as f:
-                sample = f.read(5000)
-                if sample.strip():
-                    raw_text_sample = sample
-                    break
-        except Exception:
-            pass
-            
-    # 3. Usa IA Gemini para classificar com base na amostra de texto do PDF
-    if raw_text_sample:
-        try:
-            from ai.gemini_client import get_client, generate_content_with_retry
-            client = get_client()
-            model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-            prompt = (
-                "Você é um classificador acadêmico de elite. Por favor, leia a amostra de texto abaixo extraída de um material didático "
-                "e identifique qual é a disciplina, matéria ou assunto principal do curso/aula (ex: Balística, Criminologia, Direito Penal, "
-                "Medicina Legal, Direito Constitucional, etc.).\n"
-                "REGRA ABSOLUTA: Retorne APENAS o nome da disciplina com as primeiras letras maiúsculas, em no máximo 3 ou 4 palavras, sem preâmbulos, explicações ou comentários.\n\n"
-                f"AMOSTRA DE TEXTO:\n{raw_text_sample}"
-            )
-            response = generate_content_with_retry(
-                client=client,
-                model=model,
-                contents=prompt
-            )
-            detected = response.text.strip().replace("\n", " ").replace("*", "").replace('"', '').replace("'", "")
-            if detected and len(detected) < 60:
-                return detected
-        except Exception as e:
-            print(f"Erro ao usar Gemini para detecção de matéria: {e}")
-            
-    # 4. Fallback: Adivinha a partir do nome do projeto
-    guessed = project.replace("_", " ").replace("-", " ").strip()
+    # 2. Fallback: Adivinha a partir do nome do projeto (limpo sem números no início)
+    import re
+    cleaned = re.sub(r'^\d+\s*[-_]+\s*', '', project)
+    guessed = cleaned.replace("_", " ").replace("-", " ").strip()
     return " ".join(word.capitalize() for word in guessed.split())
 
 def override_materia_in_markdown(markdown_content: str, materia: str) -> str:
