@@ -140,6 +140,27 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* Painel de prompts de imagem (ChatGPT) */
+.prompts-modal{background:var(--card);color:var(--text);border:2px solid var(--gold);border-radius:14px;box-shadow:0 15px 35px rgba(0,0,0,.35);width:min(92vw,780px);max-height:88dvh;display:flex;flex-direction:column;overflow:hidden;animation:modalScaleIn .2s ease-out;}
+.prompts-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:1rem 1.2rem .4rem;}
+.prompts-head h2{font-size:1.1rem;color:var(--navy);margin:0;}
+.prompts-sub{font-size:.8rem;color:var(--muted);}
+.prompts-close{min-width:44px;min-height:44px;border:1px solid var(--border);background:#fff;border-radius:10px;font-size:1.1rem;cursor:pointer;color:var(--navy);}
+.prompts-close:hover,.prompts-close:focus-visible{border-color:var(--gold);outline:2px solid var(--gold);outline-offset:2px;}
+.prompts-help{font-size:.82rem;color:var(--muted);padding:0 1.2rem .6rem;margin:0;}
+.prompts-body{overflow-y:auto;padding:0 1.2rem 1.2rem;display:flex;flex-direction:column;gap:12px;}
+.prompts-empty{color:var(--muted);text-align:center;padding:2rem 0;}
+.prompt-card{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg);}
+.prompt-card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+.prompt-card-head h3{font-size:.92rem;color:var(--navy);margin:0;word-break:break-all;}
+.prompt-tag{font-size:.72rem;font-weight:700;padding:3px 8px;border-radius:6px;background:#fff;border:1px solid var(--gold);color:var(--navy);}
+.prompt-meta{font-size:.78rem;color:var(--muted);margin:4px 0 8px;}
+.prompt-text{width:100%;box-sizing:border-box;font-family:inherit;font-size:.86rem;line-height:1.5;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fff;color:var(--text);resize:vertical;}
+.prompt-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+.prompt-actions .btn{min-height:40px;}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+@media (prefers-reduced-motion: reduce){.prompts-modal{animation:none;}}
+
 /* Upload Overlay Premium */
 .upload-overlay {
   display: none;
@@ -351,6 +372,21 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
       <div class="upload-progress"></div>
     </div>
     <span id="uploadOverlayStatus" class="upload-status">Preparando arquivos...</span>
+  </div>
+</div>
+
+<!-- Painel de prompts de imagem para o ChatGPT -->
+<div id="promptsOverlay" class="upload-overlay" onclick="if (event.target === this) closePromptsModal()">
+  <div class="prompts-modal" role="dialog" aria-modal="true" aria-labelledby="promptsTitle">
+    <div class="prompts-head">
+      <div>
+        <h2 id="promptsTitle">🎨 Prompts para o ChatGPT</h2>
+        <span id="promptsSub" class="prompts-sub"></span>
+      </div>
+      <button type="button" id="promptsClose" class="prompts-close" onclick="closePromptsModal()" aria-label="Fechar painel de prompts">✕</button>
+    </div>
+    <p class="prompts-help">Copie um prompt, cole no ChatGPT e salve a imagem gerada com o nome indicado.</p>
+    <div id="promptsBody" class="prompts-body"></div>
   </div>
 </div>
 
@@ -719,6 +755,7 @@ function renderMain() {
       <div class="actions">
         <button class="btn btn-primary" onclick="saveFile()">💾 Salvar</button>
         <button class="btn btn-gold" id="btnGen" onclick="generatePDF()">▶ Gerar PDF</button>
+        <button class="btn btn-ghost" id="btnPrompts" onclick="openPromptsForFile()" style="display:none;" title="Prompts de imagem e capa desta aula para o ChatGPT">🎨 Prompts das imagens</button>
         <button class="btn btn-danger" id="btnDel" onclick="deleteCurrentFile()" style="display:none;margin-left:auto;">🗑 Excluir</button>
       </div>
       
@@ -949,6 +986,7 @@ async function loadFile(filename) {
   document.getElementById("ed").value = d.content;
   document.getElementById("fileName").textContent = filename;
   document.getElementById("btnDel").style.display = "block";
+  document.getElementById("btnPrompts").style.display = "inline-flex";
   document.getElementById("log").classList.remove("on");
   file = filename;
   renderCoverPreview(currentCoversList);
@@ -979,6 +1017,7 @@ async function deleteCurrentFile() {
   document.getElementById("fileName").textContent = "Nenhum arquivo";
   document.getElementById("ed").value = "";
   document.getElementById("btnDel").style.display = "none";
+  document.getElementById("btnPrompts").style.display = "none";
   renderCoverPreview(currentCoversList);
 }
 
@@ -1444,7 +1483,8 @@ async function addFilesToQueue(input) {
           filesToConfirm.push({
             name: fObj.name,
             safe_name: dataSig.safe_name,
-            type: ext
+            type: ext,
+            file: fObj
           });
         } else {
           // Fallback: Firebase inactive or error. Add to traditional upload list
@@ -1463,16 +1503,19 @@ async function addFilesToQueue(input) {
         const confirmRes = await fetch(`/api/queue/confirm/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ files: filesToConfirm })
+          body: JSON.stringify({ files: filesToConfirm.map(({ file, ...meta }) => meta) })
         });
         const dataConfirm = await confirmRes.json();
-        
+
         if (dataConfirm.ok && dataConfirm.files) {
           dataConfirm.files.forEach(f => {
+            const src = filesToConfirm.find(x => x.safe_name === f.safe_name) || filesToConfirm.find(x => x.name === f.name);
             uploadQueue.push({
               name: f.name,
               safe_name: f.safe_name,
               type: f.type,
+              file: src ? src.file : null, // mantido em memória para enviar o PDF direto ao Gemini
+              mod, proj, // projeto de destino, fixado no momento do envio
               status: "pending",
               error: null,
               saved_as: null,
@@ -1517,10 +1560,13 @@ async function addFilesToQueue(input) {
           
           if (d.ok) {
             d.files.forEach(f => {
+              const src = filesToTraditionalUpload.find(x => x.name === f.name);
               uploadQueue.push({
                 name: f.name,
                 safe_name: f.safe_name,
                 type: f.type,
+                file: src || null,
+                mod, proj,
                 status: "pending",
                 error: null,
                 saved_as: null,
@@ -1577,6 +1623,9 @@ function renderQueue() {
     } else if (item.status === "completed") {
       statusBadge = `<span style="font-size:.72rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#dcfce7; color:#166534;">Pronto</span>`;
       btnOpen = `<button class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:.72rem; border-radius:6px;" onclick="loadFile('${item.saved_as}')">Editar</button>`;
+      if (item.prompts_imagem) {
+        btnOpen += `<button class="btn btn-ghost btn-sm" style="padding:2px 8px; font-size:.72rem; border-radius:6px;" onclick="openPromptsModal(uploadQueue[${idx}].prompts_imagem, uploadQueue[${idx}].saved_as)" title="Prompts de imagem e capa para o ChatGPT">🎨 Prompts</button>`;
+      }
       btnReprocess = `<button class="btn btn-ghost btn-sm" style="padding:2px 6px; border-radius:6px; color:var(--gold); border-color:var(--gold);" onclick="reprocessQueueItem(${idx})" title="Reprocessar arquivo individual" ${isProcessingQueue ? 'disabled' : ''}>🔄</button>`;
     } else if (item.status === "failed") {
       statusBadge = `<span style="font-size:.72rem; font-weight:700; padding:3px 8px; border-radius:6px; background:#fee2e2; color:#991b1b;" title="${item.error || 'Erro desconhecido'}">Falha</span>`;
@@ -1663,7 +1712,113 @@ async function loadGeminiConfig() {
 
 let currentKeyIdx = 0;
 
-async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
+// Marcador que separa a aula dos prompts de imagem na resposta do Gemini (definido em ai/prompt.md)
+const MARK_PROMPTS_IMAGEM = "<<<PROMPTS_DE_IMAGEM>>>";
+// Limite para enviar o PDF direto na requisição (a API aceita ~20 MB no total, já em base64)
+const MAX_INLINE_PDF_BYTES = 14 * 1024 * 1024;
+// Tempo máximo de espera por tentativa (uma aula leva normalmente de 50 a 120 s)
+const GEMINI_TIMEOUT_MS = 180 * 1000;
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+// ══ PROMPTS DE IMAGEM (CHATGPT) ══
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// Divide o texto gerado em blocos: "### Imagem N: arquivo.png" / "### Capa: arquivo.png"
+function parsePromptBlocks(text) {
+  return text.split(/^### /m).map(b => b.trim()).filter(Boolean).map(b => {
+    const title = b.split("\n")[0].trim();
+    const fence = b.match(/```[a-z]*\n([\s\S]*?)```/);
+    return {
+      title,
+      fileName: title.includes(":") ? title.split(":").slice(1).join(":").trim() : "",
+      where: (b.match(/\*\*Onde entra\*\*:\s*(.+)/) || [])[1] || "",
+      original: (b.match(/\*\*Original do PDF\*\*:\s*(.+)/) || [])[1] || "",
+      prompt: fence ? fence[1].trim() : b.split("\n").slice(1).join("\n").trim()
+    };
+  }).filter(p => p.prompt);
+}
+
+let _promptsLastFocus = null;
+let _promptsBlocks = [];
+
+function openPromptsModal(text, lessonName) {
+  _promptsBlocks = parsePromptBlocks(text || "");
+  document.getElementById("promptsSub").textContent = lessonName ? `Aula: ${lessonName}` : "";
+  const body = document.getElementById("promptsBody");
+  if (_promptsBlocks.length === 0) {
+    body.innerHTML = `<p class="prompts-empty">Nenhum prompt encontrado para esta aula.</p>`;
+  } else {
+    body.innerHTML = _promptsBlocks.map((p, i) => `
+      <section class="prompt-card" aria-labelledby="promptTitle${i}">
+        <div class="prompt-card-head">
+          <h3 id="promptTitle${i}">${escapeHtml(p.title)}</h3>
+          ${p.original ? `<span class="prompt-tag">${p.original.toLowerCase().startsWith("sim") ? "Existe no PDF original" : "Imagem nova"}</span>` : ""}
+        </div>
+        ${p.where ? `<p class="prompt-meta">Onde entra: ${escapeHtml(p.where)}</p>` : ""}
+        <label class="sr-only" for="promptText${i}">Prompt de ${escapeHtml(p.title)}</label>
+        <textarea id="promptText${i}" class="prompt-text" readonly rows="6">${escapeHtml(p.prompt)}</textarea>
+        <div class="prompt-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="copyPrompt(${i}, 'prompt', this)">Copiar prompt</button>
+          ${p.fileName ? `<button type="button" class="btn btn-ghost btn-sm" onclick="copyPrompt(${i}, 'fileName', this)" title="Nome para salvar a imagem gerada">Copiar nome: ${escapeHtml(p.fileName)}</button>` : ""}
+        </div>
+      </section>`).join("");
+  }
+  _promptsLastFocus = document.activeElement;
+  document.getElementById("promptsOverlay").style.display = "flex";
+  document.getElementById("promptsClose").focus();
+}
+
+function closePromptsModal() {
+  document.getElementById("promptsOverlay").style.display = "none";
+  if (_promptsLastFocus && _promptsLastFocus.focus) _promptsLastFocus.focus();
+}
+
+async function copyPrompt(i, field, btn) {
+  const text = _promptsBlocks[i]?.[field] || "";
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    // Fallback para navegadores sem acesso à área de transferência
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  const label = btn.textContent;
+  btn.textContent = "Copiado ✓";
+  btn.disabled = true;
+  setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1500);
+}
+
+// Abre os prompts salvos da aula aberta no editor
+async function openPromptsForFile() {
+  if (!file || !mod || !proj) return;
+  const r = await fetch(`/api/prompts/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/${encodeURIComponent(file)}`);
+  const d = await r.json();
+  if (!d.ok) { toast("ℹ️ " + (d.error || "Sem prompts para esta aula"), "error"); return; }
+  openPromptsModal(d.content, file);
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && document.getElementById("promptsOverlay")?.style.display === "flex") {
+    closePromptsModal();
+  }
+});
+
+// request: { system: string, parts: [...] } (parts no formato da API: {text} ou {inline_data})
+async function callGeminiDirect(request, maxRetries = 5, initialBackoff = 2000) {
   const config = await loadGeminiConfig();
   if (!config || (!config.key && (!config.keys || config.keys.length === 0))) {
     throw new Error("Chave do Gemini API não encontrada no backend");
@@ -1673,8 +1828,14 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   const keys = config.keys && config.keys.length > 0 ? config.keys : [config.key];
   const keysCount = keys.length;
   
-  const baseModel = config.model || "gemini-2.5-pro";
+  const baseModel = config.model || "gemini-3.8-flash";
+  const fallbackModel = config.fallback_model || "gemini-3.5-flash-lite";
   let currentModel = baseModel;
+
+  const body = { contents: [{ parts: request.parts }] };
+  if (request.system) {
+    body.system_instruction = { parts: [{ text: request.system }] };
+  }
   
   let keysTriedForCurrentModel = 0;
   let sleepsCount = 0;
@@ -1682,16 +1843,27 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
   
   while (true) {
     const activeKey = keys[currentKeyIdx % keysCount];
+    // Limite de tempo por tentativa: o Gemini às vezes fica sobrecarregado e não responde
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
     try {
+      if (request.onStatus) request.onStatus(`Gerando com ${currentModel} (chave ${currentKeyIdx % keysCount + 1})...`);
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${activeKey}`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      });
-      
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal
+        });
+      } catch (fetchErr) {
+        if (fetchErr.name === "AbortError") {
+          throw { status: 504, message: `Sem resposta do ${currentModel} em ${GEMINI_TIMEOUT_MS / 1000}s (temporary)` };
+        }
+        throw fetchErr;
+      }
+
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         const status = res.status;
@@ -1704,12 +1876,21 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
         throw new Error("Nenhum resultado gerado pelo modelo.");
       }
       
-      return data.candidates[0].content.parts[0].text;
-      
+      const parts = data.candidates[0].content?.parts || [];
+      return parts.filter(p => !p.thought).map(p => p.text || "").join("");
+
     } catch (err) {
       console.warn(`⚠️ Gemini Direct erro na chave ${currentKeyIdx % keysCount + 1} (${currentModel}):`, err);
-      
+
       const errMsg = err.message || "";
+
+      // Modelo indisponível (ex: descontinuado): passa direto para o modelo reserva
+      if (err.status === 404 && currentModel !== fallbackModel) {
+        console.warn(`🔄 Modelo ${currentModel} indisponível. Usando o modelo reserva ${fallbackModel}...`);
+        currentModel = fallbackModel;
+        keysTriedForCurrentModel = 0;
+        continue;
+      }
       const isQuotaLimit = err.status === 429 || 
                            errMsg.includes("quota") || 
                            errMsg.includes("RESOURCE_EXHAUSTED") || 
@@ -1735,14 +1916,14 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
         keysTriedForCurrentModel++;
         if (keysTriedForCurrentModel >= keysCount) {
           // Já tentou todas as chaves com esse modelo
-          if (currentModel === "gemini-2.5-pro") {
-            console.warn(`🔄 Cota do PRO excedida em todas as chaves (${keysCount}). Fazendo fallback para gemini-2.5-flash...`);
-            currentModel = "gemini-2.5-flash";
+          if (currentModel !== fallbackModel) {
+            console.warn(`🔄 Cota do ${currentModel} excedida em todas as chaves (${keysCount}). Fazendo fallback para ${fallbackModel}...`);
+            currentModel = fallbackModel;
             keysTriedForCurrentModel = 0;
-            // Tenta imediatamente com o Flash, sem dormir
+            // Tenta imediatamente com o modelo reserva, sem dormir
             continue;
           } else {
-            // Já tentou todas as chaves com Flash também
+            // Já tentou todas as chaves com o modelo reserva também
             if (sleepsCount >= maxRetries) {
               throw new Error(errMsg || "Limite de retentativas excedido (cota esgotada em todas as chaves e modelos)");
             }
@@ -1752,7 +1933,7 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
             sleepsCount++;
             backoff *= 2;
             keysTriedForCurrentModel = 0;
-            currentModel = baseModel; // reinicia com o modelo pro
+            currentModel = baseModel; // reinicia com o modelo padrão
           }
         } else {
           // Rotaciona chave e tenta imediatamente
@@ -1761,7 +1942,16 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
           continue;
         }
       } else {
-        // Outro erro temporário (ex: 503/504)
+        // Outro erro temporário (ex: 503/504 ou sem resposta)
+        // Se todas as chaves falharam com o modelo atual, passa para o modelo reserva sem esperar
+        keysTriedForCurrentModel++;
+        if (keysTriedForCurrentModel >= keysCount && currentModel !== fallbackModel) {
+          console.warn(`🔄 ${currentModel} instável em todas as chaves. Usando o modelo reserva ${fallbackModel}...`);
+          currentModel = fallbackModel;
+          keysTriedForCurrentModel = 0;
+          currentKeyIdx = (currentKeyIdx + 1) % keysCount;
+          continue;
+        }
         if (sleepsCount >= maxRetries) {
           throw new Error(errMsg || "Erro temporário persistente do Gemini");
         }
@@ -1772,8 +1962,9 @@ async function callGeminiDirect(prompt, maxRetries = 5, initialBackoff = 2000) {
         await new Promise(r => setTimeout(r, sleepTime));
         sleepsCount++;
         backoff *= 2;
-        keysTriedForCurrentModel = 0;
       }
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
@@ -1812,6 +2003,10 @@ function sanitizeMarkdown(txt) {
 }
 
 async function processQueueItem(item) {
+  // Usa o módulo/projeto em que o arquivo foi enviado, não o que estiver aberto na tela
+  // (trocar de projeto durante o processamento salvava a aula no projeto errado)
+  const itemMod = item.mod || mod;
+  const itemProj = item.proj || proj;
   item.status = "processing";
   item.status_msg = "Lendo e extraindo texto (PDF)...";
   item.error = null;
@@ -1829,7 +2024,7 @@ async function processQueueItem(item) {
     if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
 
     // 2. Extrair Texto do arquivo via backend (rápido, <1s)
-    const resExtract = await fetch(`/api/queue/extract/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
+    const resExtract = await fetch(`/api/queue/extract/${encodeURIComponent(itemMod)}/${encodeURIComponent(itemProj)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filename: item.safe_name })
@@ -1893,40 +2088,52 @@ async function processQueueItem(item) {
         "- Comece diretamente com '---' no cabeçalho YAML.\n\n";
     }
     
-    const singlePassPrompt = `${config.base_prompt}\n\n` +
-      "Você também atuará como o Revisor Editorial Sênior da Evolux Academy especializado em design instrucional e revisão ortográfica.\n" +
-      "Sua missão é gerar o conteúdo em Markdown impecável, formatado e revisado de primeira, seguindo regras rígidas de saída:\n\n" +
-      `${config.review_instructions}\n\n` +
-      "INSTRUÇÃO DE GERAÇÃO:\n" +
-      docTypeInstruction +
-      "Reescreva e adapte o conteúdo bruto fornecido abaixo ao padrão especificado, aplicando diretamente todas as diretrizes de revisão e formatação em um único passo. " +
-      "Importante: Sua resposta deve começar diretamente com '---' sem qualquer mensagem introdutória ou saudação.\n\n" +
-      `CONTEÚDO BRUTO A SER PROCESSADO:\n${dataExtract.text}`;
-      
-    let finalMarkdown = await callGeminiDirect(singlePassPrompt);
-    
+    // PDF pequeno enviado nesta sessão: o Gemini lê o próprio PDF (texto, tabelas e imagens).
+    // Caso contrário (PDF grande, outro formato ou fila recarregada), usa o texto extraído.
+    const parts = [];
+    let sourceInstruction;
+    if (item.file && item.type === "pdf" && item.file.size <= MAX_INLINE_PDF_BYTES) {
+      parts.push({ inline_data: { mime_type: "application/pdf", data: await fileToBase64(item.file) } });
+      sourceInstruction = "Faça a reescrita consciente da aula do PDF anexado, seguindo as diretrizes.";
+    } else {
+      sourceInstruction = "Faça a reescrita consciente da aula abaixo (texto extraído do arquivo original), seguindo as diretrizes.\n\n" +
+        `CONTEÚDO ORIGINAL DA AULA:\n${dataExtract.text}`;
+    }
+    parts.push({ text: docTypeInstruction + sourceInstruction });
+
+    const fullText = await callGeminiDirect({
+      system: config.base_prompt,
+      parts,
+      onStatus: msg => { item.status_msg = msg; renderQueue(); }
+    });
+
     if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
-    finalMarkdown = sanitizeMarkdown(finalMarkdown);
-    
+
+    // A resposta vem em 2 partes: a aula e os prompts de imagem
+    const [aulaText, promptsText = ""] = fullText.split(MARK_PROMPTS_IMAGEM);
+    const finalMarkdown = sanitizeMarkdown(aulaText);
+
     // 4. Salvar no projeto e na nuvem
     item.status_msg = "Salvando e sincronizando na nuvem...";
     renderQueue();
-    
-    const resSave = await fetch(`/api/queue/save/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
+
+    const resSave = await fetch(`/api/queue/save/${encodeURIComponent(itemMod)}/${encodeURIComponent(itemProj)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         filename: item.safe_name,
-        content: finalMarkdown
+        content: finalMarkdown,
+        prompts_imagem: promptsText.trim()
       })
     });
     const dataSave = await resSave.json();
     if (!dataSave.ok) throw new Error(dataSave.error || "Falha ao salvar no projeto");
-    
+
     // Concluído com Sucesso!
     item.status = "completed";
     item.checked = false; // Desmarca ao concluir
     item.saved_as = dataSave.saved_as;
+    item.prompts_imagem = promptsText.trim();
     toast(`✅ Processado: ${item.name}`, "success");
     
   } catch (err) {

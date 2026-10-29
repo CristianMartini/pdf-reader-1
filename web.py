@@ -105,6 +105,24 @@ TMPL_DIR = os.path.join(BASE, "templates")
 app = Flask(__name__, template_folder=TMPL_DIR)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024  # 64 MB
 
+
+# ── Senha de acesso (só vale quando APP_PASSWORD está definida, ex: na Vercel) ──
+@app.before_request
+def require_password():
+    import hmac
+    from flask import Response
+    expected = os.environ.get("APP_PASSWORD", "")
+    if not expected:
+        return None
+    auth = request.authorization
+    given = (auth.password or "") if auth else ""
+    if hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
+        return None
+    return Response(
+        "Acesso restrito. Informe a senha do PDF Engine Evolux.", 401,
+        {"WWW-Authenticate": 'Basic realm="PDF Engine Evolux", charset="UTF-8"'}
+    )
+
 os.makedirs(PROJECTS, exist_ok=True)
 
 
@@ -386,7 +404,8 @@ def _sync_project_from_firebase(module: str, project_name: str, force: bool = Fa
             
             # ATENÇÃO: Sincroniza localmente apenas markdowns, .keep e project_info.json.
             # Imagens e PDFs são armazenados na nuvem e baixados sob demanda.
-            if not (rel_path.endswith(".md") or rel_path == ".keep" or rel_path == "project_info.json"):
+            is_revisao = rel_path.replace('\\', '/').startswith(f"{REVISAO_DIR}/")
+            if not (rel_path.endswith(".md") or rel_path == ".keep" or rel_path == "project_info.json" or is_revisao):
                 continue
                 
             local_file_path = os.path.join(local_proj_dir, rel_path)
@@ -1306,6 +1325,34 @@ def _extract_text_from_pdf(filepath: str) -> str:
 # IMPORTAÇÃO E FILA DE PROCESSAMENTO COM IA
 # ════════════════════════════════════════
 QUEUE_DIR = "/tmp/queue-uploads" if is_vercel() else os.path.join(BASE, "temp_queue_uploads")
+REVISAO_DIR = "revisao"  # subpasta do projeto com os prompts de imagem de cada aula
+
+
+def _prompts_rel(md_filename: str) -> str:
+    """Caminho (relativo ao projeto) do arquivo de prompts de imagem de uma aula."""
+    base = os.path.splitext(secure_filename(md_filename))[0]
+    return f"{REVISAO_DIR}/{base}_prompts_chatgpt.txt"
+
+
+@app.route("/api/prompts/<module>/<project>/<filename>", methods=["GET"])
+def api_get_prompts(module, project, filename):
+    safe_mod, safe_proj = secure_filename(module), secure_filename(project)
+    rel = _prompts_rel(filename)
+    path = os.path.join(_pdir(safe_mod, safe_proj), rel)
+    if not os.path.isfile(path):
+        b = get_bucket()
+        if b:
+            try:
+                blob = b.blob(f"projects/{safe_mod}/{safe_proj}/{rel}")
+                if blob.exists():
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    blob.download_to_filename(path)
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao baixar prompts {rel}: {e}")
+    if not os.path.isfile(path):
+        return jsonify(ok=False, error="Esta aula não tem prompts de imagem salvos")
+    with open(path, "r", encoding="utf-8") as f:
+        return jsonify(ok=True, content=f.read())
 
 @app.route("/api/queue/upload/<module>/<project>", methods=["POST"])
 def api_queue_upload(module, project):
@@ -1511,7 +1558,7 @@ def api_queue_extract(module, project):
 
 @app.route("/api/config/gemini", methods=["GET"])
 def api_config_gemini():
-    from ai.gemini_client import load_prompt, API_KEY, API_KEYS
+    from ai.gemini_client import load_prompt, API_KEY, API_KEYS, DEFAULT_MODEL, FALLBACK_MODEL
     try:
         base_prompt = load_prompt()
     except Exception:
@@ -1546,12 +1593,13 @@ def api_config_gemini():
         "8. Sem emojis no corpo do texto final e respeitando estritamente a estrutura acadêmica."
     )
     
-    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-pro")
+    model = os.environ.get("GEMINI_MODEL", DEFAULT_MODEL)
     return jsonify(
         ok=True,
         key=key,
         keys=API_KEYS,
         model=model,
+        fallback_model=FALLBACK_MODEL,
         base_prompt=base_prompt,
         review_instructions=review_instructions
     )
@@ -1626,7 +1674,18 @@ def api_queue_save(module, project):
             
         # Upload do novo markdown gerado para o Firebase
         _upload_file_to_firebase(module, project, dest_filename, is_asset=False)
-        
+
+        # Prompts de imagem para o ChatGPT ficam em revisao/ como .txt,
+        # para não entrarem na listagem de aulas nem na geração dos PDFs
+        prompts = (data.get("prompts_imagem") or "").strip()
+        if prompts:
+            rel = _prompts_rel(dest_filename)
+            rev_path = os.path.join(_pdir(module, project), rel)
+            os.makedirs(os.path.dirname(rev_path), exist_ok=True)
+            with open(rev_path, "w", encoding="utf-8") as f:
+                f.write(prompts + "\n")
+            _upload_file_to_firebase(module, project, rel, is_asset=False)
+
         # Limpar arquivo temporário local e no Firebase Storage
         project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
         is_pdf = safe_name.lower().endswith(".pdf")
@@ -1818,9 +1877,11 @@ def api_download_project_mds(module, project):
         for filepath in md_files:
             basename = os.path.basename(filepath)
             zipf.write(filepath, basename)
-            
+        for filepath in glob.glob(os.path.join(pd, REVISAO_DIR, "*.txt")):
+            zipf.write(filepath, f"{REVISAO_DIR}/{os.path.basename(filepath)}")
+
     memory_file.seek(0)
-    
+
     return send_file(
         memory_file,
         mimetype="application/zip",
