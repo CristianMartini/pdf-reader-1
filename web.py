@@ -1664,10 +1664,13 @@ def api_queue_save(module, project):
         return jsonify(ok=False, error="Dados inválidos")
         
     try:
+        # A matéria do cabeçalho sempre vem do projeto, não do que a IA escreveu
+        content = override_materia_in_markdown(content, _get_project_materia(module, project))
+
         # Salva como novo .md no projeto
         dest_filename = os.path.splitext(safe_name)[0] + ".md"
         dest_path = os.path.join(_pdir(module, project), dest_filename)
-        
+
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
         with open(dest_path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -2040,7 +2043,7 @@ def override_materia_in_markdown(markdown_content: str, materia: str) -> str:
                 norm_key = key.strip().lower()
                 norm_key = ''.join(c for c in unicodedata.normalize('NFD', norm_key) if unicodedata.category(c) != 'Mn')
                 if norm_key == 'materia':
-                    new_lines.append(f"{key.rstrip()}:{sep} {materia}")
+                    new_lines.append(f"{key.rstrip()}{sep} {materia}")
                     materia_updated = True
                 else:
                     new_lines.append(line)
