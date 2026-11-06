@@ -401,16 +401,35 @@ def _format_inline(text: str) -> str:
 # ════════════════════════════════════════
 # PARSER MARKDOWN — robusto e auditado
 # ════════════════════════════════════════
-def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
+def parse_md(md_path: str, assets: str, meta: dict = None,
+             image_map: dict = None, faltando: list = None) -> list:
     """
     Converte .md em lista de flowables ReportLab.
 
     Busca de imagens (em ordem):
+      0. image_map[<nome>]         ← escolha da aula (ex.: imagem original do PDF antigo);
+                                     None = "sem imagem" de propósito
       1. <assets>/<nome>           ← pasta de assets configurada
       2. <dir do .md>/<nome>       ← fallback: mesmo diretório do arquivo .md
-    Se não encontrada em nenhum lugar, a linha [IMG:...] é silenciosamente ignorada.
+    Se não encontrada em nenhum lugar, a linha [IMG:...] é ignorada e o nome
+    entra na lista `faltando` (quando informada), para avisar quem gerou o PDF.
     """
     if meta is None: meta = {}
+
+    def _resolve_image(name_item: str, md_dir: str):
+        if image_map is not None and name_item in image_map:
+            path = image_map[name_item]
+            if path is None:  # "sem imagem" escolhido de propósito
+                return None
+            if not os.path.isfile(path):
+                # A imagem escolhida não está disponível: avisa em vez de usar outra parecida
+                path = None
+        else:
+            path = _find_image_file(name_item, assets, md_dir)
+        if path is None and faltando is not None and name_item not in faltando:
+            faltando.append(name_item)
+        return path
+
     materia = meta.get("materia", "Disciplina")
     aula = meta.get("aula", "01")
     
@@ -519,7 +538,7 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
             
             if len(names) == 1:
                 name_item = names[0].strip()
-                img_path = _find_image_file(name_item, assets, md_dir)
+                img_path = _resolve_image(name_item, md_dir)
                 
                 if img_path:
                     try:
@@ -545,7 +564,7 @@ def parse_md(md_path: str, assets: str, meta: dict = None) -> list:
                 
                 for name_item in names[:2]:
                     name_item = name_item.strip()
-                    img_path = _find_image_file(name_item, assets, md_dir)
+                    img_path = _resolve_image(name_item, md_dir)
                     if img_path:
                         try:
                             processed = _preprocess_image(img_path)
@@ -651,7 +670,8 @@ def extract_meta(md_path: str) -> dict:
 # ════════════════════════════════════════
 # RENDER INTERNO — BUILD UNIFICADO
 # ════════════════════════════════════════
-def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
+def _render(md_path: str, meta: dict, output_path: str, assets_dir: str,
+            image_map: dict = None, faltando: list = None) -> str:
     """
     Build com página de capa e conteúdo interno.
     Margens ABNT ajustadas: Superior 3.5cm | Inferior 3.2cm (para evitar sobreposição)
@@ -667,7 +687,7 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
         pageCompression=1
     )
 
-    story = parse_md(md_path, assets_dir, meta)
+    story = parse_md(md_path, assets_dir, meta, image_map=image_map, faltando=faltando)
 
     # Adiciona a página de capa no início
     story.insert(0, PageBreak())
@@ -686,8 +706,10 @@ def _render(md_path: str, meta: dict, output_path: str, assets_dir: str) -> str:
 # API PÚBLICA — build_from_md
 # ════════════════════════════════════════
 def build_from_md(md_path: str, output_path: str,
-                  assets_dir: str = None, meta: dict = None) -> str:
-    """Gera PDF diretamente de um .md (modo escalável)."""
+                  assets_dir: str = None, meta: dict = None,
+                  image_map: dict = None, faltando: list = None) -> str:
+    """Gera PDF diretamente de um .md (modo escalável).
+    image_map / faltando: ver parse_md (imagens escolhidas por aula e imagens não encontradas)."""
     md_path = os.path.abspath(md_path)
     if not os.path.exists(md_path):
         raise FileNotFoundError(f"Arquivo .md não encontrado: {md_path}")
@@ -699,7 +721,7 @@ def build_from_md(md_path: str, output_path: str,
         assets_dir = os.path.dirname(md_path)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    return _render(md_path, meta, output_path, assets_dir)
+    return _render(md_path, meta, output_path, assets_dir, image_map=image_map, faltando=faltando)
 
 
 # ════════════════════════════════════════

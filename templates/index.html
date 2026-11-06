@@ -161,6 +161,28 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
 @media (prefers-reduced-motion: reduce){.prompts-modal{animation:none;}}
 
+/* Painel de imagens da aula (originais do PDF antigo x imagens novas) */
+#imagensOverlay{z-index:9990;} /* abaixo do overlay de upload, que aparece por cima durante o envio */
+.imagens-modal{width:min(94vw,940px);}
+.imagens-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:0 1.2rem .6rem;}
+.imagens-toolbar .btn{min-height:40px;}
+.imagens-switch{display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:var(--navy);font-weight:600;cursor:pointer;min-height:40px;}
+.imagens-switch input,.slot-op input,.slot-lock input{width:18px;height:18px;accent-color:var(--navy);cursor:pointer;}
+.slot-opcoes{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;}
+.slot-op{margin:0;border:2px solid var(--border);border-radius:10px;background:#fff;padding:8px;display:flex;flex-direction:column;gap:6px;}
+.slot-op.sel{border-color:var(--gold);box-shadow:0 0 0 2px rgba(226,163,49,.25);}
+.slot-op img,.orig-sobra img{width:100%;height:150px;object-fit:contain;background:#eef1f7;border-radius:6px;}
+.slot-op img.borrada,.orig-sobra img.borrada{filter:blur(14px);}
+.slot-vazio{height:150px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:.78rem;color:var(--muted);background:#eef1f7;border-radius:6px;padding:8px;}
+.slot-op label,.slot-lock{display:flex;align-items:center;gap:6px;font-size:.82rem;font-weight:600;color:var(--navy);cursor:pointer;min-height:36px;}
+.slot-op select{width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:.8rem;background:#fff;color:var(--text);}
+.slot-lock{margin-top:6px;}
+.prompt-tag.falta{border-color:var(--red);color:var(--red);}
+.orig-sobra{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+.orig-sobra figure{margin:0;border:1px solid var(--border);border-radius:8px;background:#fff;padding:6px;display:flex;flex-direction:column;gap:6px;font-size:.75rem;color:var(--muted);}
+.orig-sobra img{height:110px;}
+.imagens-secao{font-size:.9rem;color:var(--navy);margin:6px 0 0;}
+
 /* Upload Overlay Premium */
 .upload-overlay {
   display: none;
@@ -387,6 +409,29 @@ textarea{width:100%;min-height:380px;padding:12px;border:1px solid var(--border)
     </div>
     <p class="prompts-help">Copie um prompt, cole no ChatGPT e salve a imagem gerada com o nome indicado.</p>
     <div id="promptsBody" class="prompts-body"></div>
+  </div>
+</div>
+
+<!-- Painel de imagens da aula: originais do PDF antigo x imagens novas -->
+<div id="imagensOverlay" class="upload-overlay" onclick="if (event.target === this) closeImagensModal()">
+  <div class="prompts-modal imagens-modal" role="dialog" aria-modal="true" aria-labelledby="imagensTitle">
+    <div class="prompts-head">
+      <div>
+        <h2 id="imagensTitle">🖼️ Imagens da aula</h2>
+        <span id="imagensSub" class="prompts-sub"></span>
+      </div>
+      <button type="button" id="imagensClose" class="prompts-close" onclick="closeImagensModal()" aria-label="Fechar painel de imagens">✕</button>
+    </div>
+    <div class="imagens-toolbar">
+      <button type="button" class="btn btn-gold btn-sm" onclick="document.getElementById('origUp').click()" title="Envie a apostila antiga desta aula para salvar as fotos originais">📎 Anexar PDF original</button>
+      <input type="file" id="origUp" accept=".pdf,application/pdf" style="display:none" onchange="anexarPdfOriginal(this)">
+      <label class="imagens-switch" title="As fotos originais ficam travadas e não viram prompt do ChatGPT">
+        <input type="checkbox" id="imgSensiveis" onchange="toggleImagensSensiveis(this.checked)"> 🔒 Imagens sensíveis neste projeto
+      </label>
+      <button type="button" class="btn btn-ghost btn-sm" id="btnMostrarFotos" onclick="toggleMostrarFotos()" style="display:none;"></button>
+    </div>
+    <p id="imagensResumo" class="prompts-help"></p>
+    <div id="imagensBody" class="prompts-body"></div>
   </div>
 </div>
 
@@ -756,6 +801,7 @@ function renderMain() {
         <button class="btn btn-primary" onclick="saveFile()">💾 Salvar</button>
         <button class="btn btn-gold" id="btnGen" onclick="generatePDF()">▶ Gerar PDF</button>
         <button class="btn btn-ghost" id="btnPrompts" onclick="openPromptsForFile()" style="display:none;" title="Prompts de imagem e capa desta aula para o ChatGPT">🎨 Prompts das imagens</button>
+        <button class="btn btn-ghost" id="btnImagens" onclick="openImagensForFile()" style="display:none;" title="Fotos originais do PDF antigo e imagens novas desta aula">🖼️ Imagens da aula</button>
         <button class="btn btn-danger" id="btnDel" onclick="deleteCurrentFile()" style="display:none;margin-left:auto;">🗑 Excluir</button>
       </div>
       
@@ -987,6 +1033,7 @@ async function loadFile(filename) {
   document.getElementById("fileName").textContent = filename;
   document.getElementById("btnDel").style.display = "block";
   document.getElementById("btnPrompts").style.display = "inline-flex";
+  document.getElementById("btnImagens").style.display = "inline-flex";
   document.getElementById("log").classList.remove("on");
   file = filename;
   renderCoverPreview(currentCoversList);
@@ -1018,6 +1065,7 @@ async function deleteCurrentFile() {
   document.getElementById("ed").value = "";
   document.getElementById("btnDel").style.display = "none";
   document.getElementById("btnPrompts").style.display = "none";
+  document.getElementById("btnImagens").style.display = "none";
   renderCoverPreview(currentCoversList);
 }
 
@@ -1180,7 +1228,14 @@ async function generatePDF() {
   btn.innerHTML = "▶ Gerar PDF"; btn.disabled = false;
   if (d.ok && d.result?.length) {
     log.innerHTML += `\n<span class="ok">✅ ${d.result[0]} gerado!</span>`;
-    toast("✅ PDF gerado!","success");
+    // Imagens pedidas na aula que não tinham arquivo ficaram fora do PDF
+    const faltando = (d.avisos || []).flatMap(a => a.faltando || []);
+    if (faltando.length) {
+      log.innerHTML += `\n<span class="err">⚠️ ${faltando.length} imagem(ns) sem arquivo ficaram fora do PDF: ${escapeHtml(faltando.join(", "))}. Confira em 🖼️ Imagens da aula.</span>`;
+      toast(`⚠️ PDF gerado sem ${faltando.length} imagem(ns)`, "error");
+    } else {
+      toast("✅ PDF gerado!","success");
+    }
     _pdfSig=""; loadFiles(true); await refreshProjectsOfModule(mod);
   } else {
     log.innerHTML += `\n<span class="err">❌ ${d.error||'Erro ao gerar'}</span>`;
@@ -1497,38 +1552,47 @@ async function addFilesToQueue(input) {
     }
     
     // 2. Confirm direct uploads with backend
+    // Um arquivo por requisição: o servidor extrai texto e imagens originais de cada PDF,
+    // e várias apostilas juntas numa requisição só podiam estourar o tempo limite da Vercel
     if (filesToConfirm.length > 0) {
-      updateUploadOverlayStatus(`Processando no servidor... Aguarde a extração.`);
-      try {
-        const confirmRes = await fetch(`/api/queue/confirm/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ files: filesToConfirm.map(({ file, ...meta }) => meta) })
-        });
-        const dataConfirm = await confirmRes.json();
+      let confirmados = 0;
+      for (const [i, fc] of filesToConfirm.entries()) {
+        updateUploadOverlayStatus(`Extraindo texto e imagens originais (${i + 1}/${filesToConfirm.length}): ${fc.name}...`);
+        try {
+          const { file, ...meta } = fc;
+          const confirmRes = await fetch(`/api/queue/confirm/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ files: [meta] })
+          });
+          const dataConfirm = await confirmRes.json();
 
-        if (dataConfirm.ok && dataConfirm.files) {
-          dataConfirm.files.forEach(f => {
-            const src = filesToConfirm.find(x => x.safe_name === f.safe_name) || filesToConfirm.find(x => x.name === f.name);
+          if (dataConfirm.ok && dataConfirm.files && dataConfirm.files.length) {
+            const f = dataConfirm.files[0];
             uploadQueue.push({
               name: f.name,
               safe_name: f.safe_name,
               type: f.type,
-              file: src ? src.file : null, // mantido em memória para enviar o PDF direto ao Gemini
+              file: file, // mantido em memória para enviar o PDF direto ao Gemini
+              originais: f.originais || [], // imagens do PDF antigo já salvas no projeto
+              sensivel: !!dataConfirm.sensivel,
               mod, proj, // projeto de destino, fixado no momento do envio
               status: "pending",
               error: null,
               saved_as: null,
               checked: true
             });
-          });
-          toast(`✅ ${dataConfirm.files.length} arquivos na fila`, "success");
-          renderQueue();
-        } else {
-          toast("❌ Erro ao confirmar arquivos no servidor", "error");
+            confirmados++;
+          } else {
+            toast(`❌ Erro ao confirmar ${fc.name} no servidor`, "error");
+          }
+        } catch (err) {
+          toast(`❌ Falha de rede na confirmação de ${fc.name}`, "error");
         }
-      } catch (err) {
-        toast("❌ Falha de rede na confirmação da fila", "error");
+      }
+      if (confirmados) {
+        toast(`✅ ${confirmados} arquivos na fila`, "success");
+        renderQueue();
       }
     }
     
@@ -1566,6 +1630,8 @@ async function addFilesToQueue(input) {
                 safe_name: f.safe_name,
                 type: f.type,
                 file: src || null,
+                originais: f.originais || [],
+                sensivel: !!d.sensivel,
                 mod, proj,
                 status: "pending",
                 error: null,
@@ -1743,9 +1809,18 @@ function parsePromptBlocks(text) {
       fileName: title.includes(":") ? title.split(":").slice(1).join(":").trim() : "",
       where: (b.match(/\*\*Onde entra\*\*:\s*(.+)/) || [])[1] || "",
       original: (b.match(/\*\*Original do PDF\*\*:\s*(.+)/) || [])[1] || "",
-      prompt: fence ? fence[1].trim() : b.split("\n").slice(1).join("\n").trim()
+      // Imagens originais de projetos sensíveis vêm sem prompt (não serão geradas no ChatGPT)
+      prompt: fence ? fence[1].trim()
+        : /\*\*Prompt para o ChatGPT\*\*:/.test(b) ? b.split(/\*\*Prompt para o ChatGPT\*\*:\s*/)[1].trim()
+        : /\*\*Original do PDF\*\*/.test(b) ? "" : b.split("\n").slice(1).join("\n").trim()
     };
-  }).filter(p => p.prompt);
+  }).filter(p => p.prompt || p.original);
+}
+
+// "Original do PDF": nome do arquivo extraído (ex: p02_01.jpg) ou "Sim" = imagem do PDF antigo
+function isOriginalRef(value) {
+  const v = (value || "").trim().toLowerCase();
+  return v.startsWith("sim") || /p\d{2,3}_\d{2}/.test(v);
 }
 
 let _promptsLastFocus = null;
@@ -1762,15 +1837,18 @@ function openPromptsModal(text, lessonName) {
       <section class="prompt-card" aria-labelledby="promptTitle${i}">
         <div class="prompt-card-head">
           <h3 id="promptTitle${i}">${escapeHtml(p.title)}</h3>
-          ${p.original ? `<span class="prompt-tag">${p.original.toLowerCase().startsWith("sim") ? "Existe no PDF original" : "Imagem nova"}</span>` : ""}
+          ${p.original ? `<span class="prompt-tag">${isOriginalRef(p.original) ? "Existe no PDF original" : "Imagem nova"}</span>` : ""}
         </div>
         ${p.where ? `<p class="prompt-meta">Onde entra: ${escapeHtml(p.where)}</p>` : ""}
+        ${p.prompt ? `
         <label class="sr-only" for="promptText${i}">Prompt de ${escapeHtml(p.title)}</label>
         <textarea id="promptText${i}" class="prompt-text" readonly rows="6">${escapeHtml(p.prompt)}</textarea>
         <div class="prompt-actions">
           <button type="button" class="btn btn-primary btn-sm" onclick="copyPrompt(${i}, 'prompt', this)">Copiar prompt</button>
           ${p.fileName ? `<button type="button" class="btn btn-ghost btn-sm" onclick="copyPrompt(${i}, 'fileName', this)" title="Nome para salvar a imagem gerada">Copiar nome: ${escapeHtml(p.fileName)}</button>` : ""}
-        </div>
+        </div>` : isOriginalRef(p.original)
+          ? `<p class="prompt-meta">Usa a imagem original do PDF (${escapeHtml(p.original)}): não precisa gerar no ChatGPT. Confira em 🖼️ Imagens da aula.</p>`
+          : `<p class="prompt-meta">Sem prompt para esta imagem.</p>`}
       </section>`).join("");
   }
   _promptsLastFocus = document.activeElement;
@@ -1814,8 +1892,325 @@ async function openPromptsForFile() {
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && document.getElementById("promptsOverlay")?.style.display === "flex") {
     closePromptsModal();
+  } else if (e.key === "Escape" && document.getElementById("imagensOverlay")?.style.display === "flex") {
+    closeImagensModal();
   }
 });
+
+// ══ IMAGENS DA AULA (originais do PDF antigo x imagens novas) ══
+// Estado do painel: { aula, sensivel, pdf_original, originais, descartadas, escolhas, slots, mostrar }
+let _imgPanel = null;
+let _imgPanelLastFocus = null;
+let _salvarEscolhasTimer = null;
+
+// Mesmas regras do motor de PDF: linha começando com [IMG:a.png] ou [IMG:a.png|b.png] (descrição)
+function slotsDaAula(md) {
+  const slots = [], vistos = new Set();
+  for (const raw of (md || "").split("\n")) {
+    const linha = raw.trim();
+    if (!linha.startsWith("[IMG:")) continue;
+    const fim = linha.indexOf("]");
+    if (fim === -1) continue;
+    let desc = linha.slice(fim + 1).trim();
+    if (desc.startsWith("(") && desc.endsWith(")")) desc = desc.slice(1, -1).trim();
+    for (let nome of linha.slice(5, fim).split("|")) {
+      nome = nome.trim();
+      if (nome && !vistos.has(nome)) { vistos.add(nome); slots.push({ nome, descricao: desc }); }
+    }
+  }
+  return slots;
+}
+
+// Imagem nova (assets/) que o motor usaria para a tag: mesmo nome ou nome parecido
+function limparNomeImagem(n) {
+  return n.replace(/\.[^.]+$/, "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+}
+function novaDoSlot(nome) {
+  if (currentImagesList.includes(nome)) return nome;
+  const alvo = limparNomeImagem(nome);
+  if (!alvo) return null;
+  return currentImagesList.find(f => {
+    const c = limparNomeImagem(f);
+    return c === alvo || c.includes(alvo) || alvo.includes(c);
+  }) || null;
+}
+
+function urlOriginal(arquivo) {
+  return `/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/originais/${encodeURIComponent(_imgPanel.aula)}/${encodeURIComponent(arquivo)}`;
+}
+function urlNova(arquivo) {
+  return `/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/assets/${encodeURIComponent(arquivo)}`;
+}
+
+function estadoDoSlot(nome) {
+  const e = _imgPanel.escolhas[nome];
+  const nova = novaDoSlot(nome);
+  if (e) return { usar: e.usar, original: e.original || null, travada: !!e.travada, nova };
+  // Sem escolha salva, o motor procura uma imagem nova em assets/
+  return { usar: nova ? "nova" : "falta", original: null, travada: false, nova };
+}
+
+function aplicarDadosImagens(d) {
+  _imgPanel = {
+    aula: d.aula,
+    sensivel: !!d.sensivel,
+    pdf_original: d.pdf_original || "",
+    originais: d.originais || [],
+    descartadas: d.descartadas || {},
+    escolhas: d.escolhas || {},
+    slots: slotsDaAula(document.getElementById("ed").value),
+    mostrar: _imgPanel ? _imgPanel.mostrar : !d.sensivel
+  };
+  renderImagensPanel();
+}
+
+async function openImagensForFile() {
+  if (!file || !mod || !proj) return;
+  try {
+    const r = await fetch(`/api/imagens/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/${encodeURIComponent(file)}`);
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || "Falha ao carregar as imagens da aula");
+    _imgPanel = null;
+    aplicarDadosImagens(d);
+  } catch (err) {
+    toast("❌ " + err.message, "error");
+    return;
+  }
+  document.getElementById("imagensSub").textContent = `Aula: ${file}`;
+  _imgPanelLastFocus = document.activeElement;
+  document.getElementById("imagensOverlay").style.display = "flex";
+  document.getElementById("imagensClose").focus();
+}
+
+function closeImagensModal() {
+  document.getElementById("imagensOverlay").style.display = "none";
+  if (_imgPanelLastFocus && _imgPanelLastFocus.focus) _imgPanelLastFocus.focus();
+}
+
+function renderImagensPanel() {
+  const p = _imgPanel;
+  document.getElementById("imgSensiveis").checked = p.sensivel;
+  const btnMostrar = document.getElementById("btnMostrarFotos");
+  btnMostrar.style.display = p.originais.length ? "inline-flex" : "none";
+  btnMostrar.textContent = p.mostrar ? "🙈 Ocultar fotos" : "👁 Mostrar fotos";
+  const borrada = p.mostrar ? "" : "borrada";
+
+  const desc = p.descartadas || {};
+  const ignoradas = (desc.fundo || 0) + (desc.repetidas || 0) + (desc.minusculas || 0);
+  document.getElementById("imagensResumo").textContent = p.originais.length
+    ? `PDF original: ${p.pdf_original} · ${p.originais.length} imagem(ns) salva(s)` +
+      (ignoradas ? ` · ${ignoradas} ignorada(s) (fundo de página, logos e ícones)` : "") +
+      (desc.erros ? ` · ⚠️ ${desc.erros} não puderam ser lidas` : "")
+    : "Esta aula ainda não tem imagens originais. Use 📎 Anexar PDF original para salvar as fotos da apostila antiga.";
+
+  const opcoesOriginais = sel => p.originais.map(o =>
+    `<option value="${escapeHtml(o.arquivo)}" ${o.arquivo === sel ? "selected" : ""}>${escapeHtml(o.arquivo)} · pág. ${o.pagina}</option>`).join("");
+
+  const cards = p.slots.map((s, i) => {
+    const st = estadoDoSlot(s.nome);
+    const original = st.original || "";
+    const tag = { original: "Original do PDF", nova: "Imagem nova", nenhuma: "Sem imagem", falta: "⚠️ Sem arquivo" }[st.usar];
+    const semArquivo = st.usar === "falta" || (st.usar === "original" && !p.originais.some(o => o.arquivo === original));
+    const travada = st.travada && st.usar === "original";
+    return `
+      <section class="prompt-card" aria-labelledby="slotTitle${i}">
+        <div class="prompt-card-head">
+          <h3 id="slotTitle${i}">${escapeHtml(s.nome)}</h3>
+          <span class="prompt-tag ${semArquivo ? "falta" : ""}">${semArquivo && st.usar !== "falta" ? "⚠️ Original não encontrada" : tag}</span>
+        </div>
+        ${s.descricao ? `<p class="prompt-meta">${escapeHtml(s.descricao)}</p>` : ""}
+        <div class="slot-opcoes" role="radiogroup" aria-label="Imagem usada em ${escapeHtml(s.nome)}">
+          <figure class="slot-op ${st.usar === "original" ? "sel" : ""}">
+            ${original && p.originais.some(o => o.arquivo === original)
+              ? `<img src="${urlOriginal(original)}" alt="Imagem original ${escapeHtml(original)}" loading="lazy" class="${borrada}">`
+              : `<div class="slot-vazio">${p.originais.length ? "Escolha uma imagem original" : "Sem imagens originais nesta aula"}</div>`}
+            <label><input type="radio" id="usar${i}_original" name="usar${i}" value="original" ${st.usar === "original" ? "checked" : ""} ${p.originais.length ? "" : "disabled"} ${travada ? "disabled" : ""} onchange="setUsarSlot(${i}, 'original')"> Original do PDF</label>
+            ${p.originais.length ? `<select id="orig${i}" aria-label="Imagem original para ${escapeHtml(s.nome)}" ${travada ? "disabled" : ""} onchange="setOriginalSlot(${i}, this.value)">
+              ${original ? "" : `<option value="" selected>Escolha…</option>`}${opcoesOriginais(original)}</select>` : ""}
+          </figure>
+          ${p.sensivel ? "" : `
+          <figure class="slot-op ${st.usar === "nova" ? "sel" : ""}">
+            ${st.nova
+              ? `<img src="${urlNova(st.nova)}" alt="Imagem nova ${escapeHtml(st.nova)}" loading="lazy">`
+              : `<div class="slot-vazio">Nenhuma imagem nova enviada. Gere no ChatGPT e envie no Passo 4 com o nome ${escapeHtml(s.nome)}</div>`}
+            <label><input type="radio" id="usar${i}_nova" name="usar${i}" value="nova" ${st.usar === "nova" ? "checked" : ""} ${st.nova && !travada ? "" : "disabled"} onchange="setUsarSlot(${i}, 'nova')"> Imagem nova</label>
+          </figure>`}
+          <figure class="slot-op ${st.usar === "nenhuma" ? "sel" : ""}">
+            <div class="slot-vazio">A aula sai sem imagem neste ponto</div>
+            <label><input type="radio" id="usar${i}_nenhuma" name="usar${i}" value="nenhuma" ${st.usar === "nenhuma" ? "checked" : ""} ${travada ? "disabled" : ""} onchange="setUsarSlot(${i}, 'nenhuma')"> Sem imagem</label>
+          </figure>
+        </div>
+        ${p.originais.length ? `<label class="slot-lock"><input type="checkbox" id="trava${i}" ${travada ? "checked" : ""} ${st.usar === "original" && original ? "" : "disabled"} onchange="setTravadaSlot(${i}, this.checked)"> 🔒 Travar na original (material didático)</label>` : ""}
+      </section>`;
+  });
+
+  // Originais que nenhuma tag usa: podem ser inseridas no editor
+  const usadas = new Set(p.slots.map(s => estadoDoSlot(s.nome)).filter(st => st.usar === "original").map(st => st.original));
+  const sobras = p.originais.map((o, idx) => ({ o, idx })).filter(({ o }) => !usadas.has(o.arquivo));
+  const sobrasHtml = sobras.length ? `
+      <h3 class="imagens-secao">Originais que não estão na aula (${sobras.length})</h3>
+      <div class="orig-sobra">${sobras.map(({ o, idx }) => `
+        <figure>
+          <img src="${urlOriginal(o.arquivo)}" alt="Imagem original ${escapeHtml(o.arquivo)}" loading="lazy" class="${borrada}">
+          <span>${escapeHtml(o.arquivo)} · pág. ${o.pagina}</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="inserirOriginalNoEditor(${idx})">Inserir no editor</button>
+        </figure>`).join("")}
+      </div>` : "";
+
+  // Redesenhar o painel não pode tirar o foco de quem usa o teclado
+  const foco = document.activeElement && document.activeElement.id;
+  document.getElementById("imagensBody").innerHTML =
+    (cards.join("") || `<p class="prompts-empty">Esta aula não tem tags [IMG:...]. Use "Inserir no editor" abaixo para colocar uma imagem original.</p>`) + sobrasHtml;
+  if (foco && document.getElementById(foco)) document.getElementById(foco).focus();
+}
+
+function escolhaDoSlot(i) {
+  const nome = _imgPanel.slots[i].nome;
+  const atual = estadoDoSlot(nome);
+  return { nome, atual };
+}
+
+function setUsarSlot(i, usar) {
+  const { nome, atual } = escolhaDoSlot(i);
+  const e = { usar, original: atual.original, travada: false };
+  if (usar === "original") {
+    // Sem original escolhida ainda: sugere a primeira que nenhuma outra tag usa
+    if (!e.original) {
+      const usadas = new Set(Object.values(_imgPanel.escolhas).map(x => x.original));
+      e.original = (_imgPanel.originais.find(o => !usadas.has(o.arquivo)) || _imgPanel.originais[0] || {}).arquivo || null;
+    }
+    e.travada = _imgPanel.sensivel;
+  }
+  _imgPanel.escolhas[nome] = e;
+  salvarEscolhas();
+}
+
+function setOriginalSlot(i, arquivo) {
+  const { nome, atual } = escolhaDoSlot(i);
+  if (!arquivo) return;
+  _imgPanel.escolhas[nome] = { usar: "original", original: arquivo, travada: atual.travada || _imgPanel.sensivel };
+  salvarEscolhas();
+}
+
+function setTravadaSlot(i, travada) {
+  const { nome, atual } = escolhaDoSlot(i);
+  if (atual.usar !== "original" || !atual.original) return;
+  _imgPanel.escolhas[nome] = { usar: "original", original: atual.original, travada };
+  salvarEscolhas();
+}
+
+function salvarEscolhas() {
+  renderImagensPanel();
+  clearTimeout(_salvarEscolhasTimer);
+  const alvo = { mod, proj, file, escolhas: JSON.parse(JSON.stringify(_imgPanel.escolhas)) };
+  _salvarEscolhasTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/imagens/${encodeURIComponent(alvo.mod)}/${encodeURIComponent(alvo.proj)}/${encodeURIComponent(alvo.file)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ escolhas: alvo.escolhas })
+      });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || "Falha ao salvar");
+      if (_imgPanel && alvo.file === file) _imgPanel.escolhas = d.escolhas || {};
+      toast("💾 Escolha de imagens salva", "success");
+    } catch (err) {
+      toast("❌ Escolha de imagens não salva: " + err.message, "error");
+    }
+  }, 400);
+}
+
+async function toggleImagensSensiveis(sensivel) {
+  try {
+    const r = await fetch(`/api/projects/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/imagens-sensiveis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sensivel })
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || "Falha ao salvar");
+  } catch (err) {
+    toast("❌ " + err.message, "error");
+    document.getElementById("imgSensiveis").checked = !sensivel;
+    return;
+  }
+  _imgPanel.sensivel = sensivel;
+  if (sensivel) {
+    // Projeto sensível: toda tag ligada a uma original fica travada nela
+    _imgPanel.mostrar = false;
+    for (const [nome, e] of Object.entries(_imgPanel.escolhas)) {
+      if (e.usar === "original" && e.original) _imgPanel.escolhas[nome] = { ...e, travada: true };
+    }
+    salvarEscolhas();
+  } else {
+    renderImagensPanel();
+  }
+  toast(sensivel ? "🔒 Imagens sensíveis: as originais ficam travadas" : "Imagens sensíveis desligado", "success");
+}
+
+function toggleMostrarFotos() {
+  _imgPanel.mostrar = !_imgPanel.mostrar;
+  renderImagensPanel();
+}
+
+function inserirOriginalNoEditor(idx) {
+  const o = _imgPanel.originais[idx];
+  if (!o) return;
+  const t = document.getElementById("ed");
+  // Nunca dentro do cabeçalho YAML: sem cursor depois dele, a tag vai para o fim da aula
+  const fm = t.value.match(/^\s*---[\s\S]*?\n---\s*\n/);
+  if (fm && t.selectionStart < fm[0].length) t.selectionStart = t.selectionEnd = t.value.length;
+  ins(`\n[IMG:${o.arquivo}] (Imagem original da página ${o.pagina})\n`);
+  _imgPanel.slots = slotsDaAula(t.value);
+  _imgPanel.escolhas[o.arquivo] = { usar: "original", original: o.arquivo, travada: _imgPanel.sensivel };
+  salvarEscolhas();
+  document.getElementById("imagensClose").focus();
+  toast("🖼️ Tag inserida no editor. Salve a aula para manter.", "success");
+}
+
+async function anexarPdfOriginal(input) {
+  const pdf = input.files && input.files[0];
+  input.value = "";
+  if (!pdf || !file || !mod || !proj) return;
+  if (_imgPanel && _imgPanel.originais.length &&
+      !confirm("Esta aula já tem imagens originais salvas. Substituir pelas imagens deste PDF?")) return;
+  // O servidor liga as tags [IMG] da versão salva da aula
+  await saveFile();
+  showUploadOverlay(`Lendo as imagens de ${pdf.name}...`);
+  try {
+    const url = `/api/imagens/${encodeURIComponent(mod)}/${encodeURIComponent(proj)}/${encodeURIComponent(file)}/anexar`;
+    const resSig = await fetch("/api/upload/signed-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ module: mod, project: proj, filename: pdf.name, contentType: pdf.type || "application/pdf", kind: "original" })
+    });
+    const sig = await resSig.json();
+    let d;
+    if (sig.ok && sig.firebase_active && sig.url) {
+      // Firebase ativo: upload direto para o Storage (sem o limite de 4.5MB da Vercel)
+      updateUploadOverlayStatus("Enviando o PDF para o Storage...");
+      const up = await fetch(sig.url, { method: "PUT", headers: { "Content-Type": pdf.type || "application/pdf" }, body: pdf });
+      if (!up.ok) throw new Error(`Erro HTTP no upload direto: ${up.statusText}`);
+      updateUploadOverlayStatus("Extraindo as imagens originais...");
+      d = await (await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ arquivo: sig.safe_name, nome: pdf.name })
+      })).json();
+    } else {
+      const fd = new FormData();
+      fd.append("file", pdf);
+      d = await (await fetch(url, { method: "POST", body: fd })).json();
+    }
+    if (!d.ok) throw new Error(d.error || "Falha ao ler o PDF");
+    aplicarDadosImagens(d);
+    toast(`🖼️ ${d.originais.length} imagem(ns) original(is) salva(s)`, "success");
+  } catch (err) {
+    toast("❌ " + err.message, "error");
+  } finally {
+    hideUploadOverlay();
+  }
+}
 
 // request: { system: string, parts: [...] } (parts no formato da API: {text} ou {inline_data})
 async function callGeminiDirect(request, maxRetries = 5, initialBackoff = 2000) {
@@ -1872,6 +2267,15 @@ async function callGeminiDirect(request, maxRetries = 5, initialBackoff = 2000) 
       }
       
       const data = await res.json();
+      // Filtro de segurança do Gemini (ex: fotos sensíveis no PDF): trocar de chave ou modelo não resolve
+      const finishReason = data.candidates?.[0]?.finishReason || "";
+      const blockReason = data.promptFeedback?.blockReason ||
+        (["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "IMAGE_SAFETY"].includes(finishReason) ? finishReason : "");
+      if (blockReason) {
+        const blocked = new Error(`Bloqueado pelo filtro de segurança do Gemini (${blockReason})`);
+        blocked.bloqueado = true;
+        throw blocked;
+      }
       if (!data.candidates || data.candidates.length === 0) {
         throw new Error("Nenhum resultado gerado pelo modelo.");
       }
@@ -1881,6 +2285,7 @@ async function callGeminiDirect(request, maxRetries = 5, initialBackoff = 2000) 
 
     } catch (err) {
       console.warn(`⚠️ Gemini Direct erro na chave ${currentKeyIdx % keysCount + 1} (${currentModel}):`, err);
+      if (err.bloqueado) throw err;
 
       const errMsg = err.message || "";
 
@@ -1990,6 +2395,9 @@ function sanitizeMarkdown(txt) {
     }
   }
 
+  // Marcações [IMAGEM ORIGINAL: ...] do texto extraído não fazem parte da aula
+  clean = clean.split('\n').filter(line => !line.trim().startsWith("[IMAGEM ORIGINAL:")).join('\n');
+
   // 3. Remove caracteres de blockquote (>) do início de linhas
   clean = clean.split('\n').map(line => {
     const trimmed = line.trim();
@@ -2088,24 +2496,52 @@ async function processQueueItem(item) {
         "- Comece diretamente com '---' no cabeçalho YAML.\n\n";
     }
     
+    // Imagens originais do PDF antigo, já salvas no projeto quando o arquivo entrou na fila
+    const originais = item.originais || [];
+    let originaisInstruction = "";
+    if (originais.length) {
+      originaisInstruction =
+        "IMAGENS ORIGINAIS DO PDF (já salvas no projeto; use o nome exato no campo 'Original do PDF'):\n" +
+        originais.map(o => `- ${o.arquivo}: página ${o.pagina}, a ${o.topo_pct}% do topo da página`).join("\n") + "\n\n";
+      if (item.sensivel) {
+        originaisInstruction +=
+          "⚠️ IMAGENS SENSÍVEIS: as imagens originais deste material têm conteúdo sensível e NÃO serão substituídas por imagens novas.\n" +
+          "- No bloco de prompts, para cada imagem original escreva apenas 'Onde entra' e 'Original do PDF', sem 'Prompt para o ChatGPT'.\n" +
+          "- Não sugira imagens novas com conteúdo sensível.\n\n";
+      }
+    }
+
     // PDF pequeno enviado nesta sessão: o Gemini lê o próprio PDF (texto, tabelas e imagens).
     // Caso contrário (PDF grande, outro formato ou fila recarregada), usa o texto extraído.
+    const textInstruction = "Faça a reescrita consciente da aula abaixo (texto extraído do arquivo original), seguindo as diretrizes.\n\n" +
+      `CONTEÚDO ORIGINAL DA AULA:\n${dataExtract.text}`;
     const parts = [];
     let sourceInstruction;
-    if (item.file && item.type === "pdf" && item.file.size <= MAX_INLINE_PDF_BYTES) {
+    const sendPdf = item.file && item.type === "pdf" && item.file.size <= MAX_INLINE_PDF_BYTES;
+    if (sendPdf) {
       parts.push({ inline_data: { mime_type: "application/pdf", data: await fileToBase64(item.file) } });
       sourceInstruction = "Faça a reescrita consciente da aula do PDF anexado, seguindo as diretrizes.";
     } else {
-      sourceInstruction = "Faça a reescrita consciente da aula abaixo (texto extraído do arquivo original), seguindo as diretrizes.\n\n" +
-        `CONTEÚDO ORIGINAL DA AULA:\n${dataExtract.text}`;
+      sourceInstruction = textInstruction;
     }
-    parts.push({ text: docTypeInstruction + sourceInstruction });
+    parts.push({ text: docTypeInstruction + originaisInstruction + sourceInstruction });
 
-    const fullText = await callGeminiDirect({
-      system: config.base_prompt,
-      parts,
-      onStatus: msg => { item.status_msg = msg; renderQueue(); }
-    });
+    const onStatus = msg => { item.status_msg = msg; renderQueue(); };
+    let fullText;
+    try {
+      fullText = await callGeminiDirect({ system: config.base_prompt, parts, onStatus });
+    } catch (err) {
+      if (!err.bloqueado || !sendPdf) throw err;
+      // O filtro do Gemini barrou o PDF (ex: fotos sensíveis): reenvia só o texto,
+      // que já marca onde ficava cada imagem original
+      console.warn("🛡️ PDF bloqueado pelo filtro do Gemini. Reenviando apenas o texto extraído...");
+      onStatus("O Gemini barrou as fotos do PDF; reenviando só o texto...");
+      fullText = await callGeminiDirect({
+        system: config.base_prompt,
+        parts: [{ text: docTypeInstruction + originaisInstruction + textInstruction }],
+        onStatus
+      });
+    }
 
     if (shouldStopProcessing) throw new Error("Cancelado pelo usuário");
 
