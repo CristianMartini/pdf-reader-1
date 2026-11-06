@@ -36,6 +36,7 @@ Use pelo menos dois `[BOX]` para os conceitos-chave QUE JÁ ESTÃO no original:
 ### 5. IMAGENS
 - Use EXCLUSIVAMENTE `[IMG:nome_descritivo.png] (descrição do que a imagem mostra)` em linha isolada. Nunca `![alt](url)`. Sem legenda acima ou abaixo da tag.
 - Para cada imagem que existe no PDF original (fotos, esquemas, tabelas em imagem), coloque uma tag `[IMG:...]` NO MESMO PONTO do texto em que ela aparece, com uma descrição fiel do que a imagem original mostra. Ignore logotipos, marcas d'água e elementos que se repetem em todas as páginas.
+- Se a mensagem trouxer a lista "IMAGENS ORIGINAIS DO PDF", ou se o texto trouxer linhas `[IMAGEM ORIGINAL: arquivo]`, cada item é uma imagem do PDF antigo já salva com esse nome: crie uma tag `[IMG:...]` para cada uma, no ponto em que ela aparece. As linhas `[IMAGEM ORIGINAL: ...]` são só marcações: nunca as copie para a aula.
 - Você pode sugerir no máximo 2 imagens novas onde elas ajudariam muito a didática.
 - Imagem dupla lado a lado: `[IMG:a.png|b.png] (descrição)`.
 
@@ -69,7 +70,7 @@ E abaixo dela, um bloco para CADA tag `[IMG:...]` da aula, na mesma ordem, e por
 
 ### Imagem N: nome_do_arquivo.png
 - **Onde entra**: título da seção da aula.
-- **Original do PDF**: Sim (existe uma imagem equivalente no PDF, que pode ser reutilizada) | Não (imagem nova).
+- **Original do PDF**: o nome exato do arquivo, quando a imagem está na lista de imagens originais ou numa marcação `[IMAGEM ORIGINAL: ...]` (ex: p02_01.jpg) | Sim (existe uma imagem equivalente no PDF, que pode ser reutilizada) | Não (imagem nova).
 - **Prompt para o ChatGPT**:
 ```
 (prompt completo em português, pronto para colar)

@@ -124,6 +124,20 @@ Para ativar a persistência e uploads ilimitados na Vercel, defina:
 
 ---
 
+## 🖼️ Imagens originais das aulas (material didático)
+
+Fotos e figuras das apostilas antigas que não podem ser trocadas por imagens novas (ex.: conteúdo sensível) são guardadas e usadas no PDF final.
+
+- **Extração** (`engine/originais.py`): quando um PDF entra na fila, antes de ser apagado, o servidor salva as imagens que aparecem nas páginas, na qualidade original (o JPEG gravado no PDF é copiado sem recompressão). Fundo de página, logos repetidos e ícones são ignorados. Para aulas já prontas, use **🖼️ Imagens da aula → 📎 Anexar PDF original**.
+- **Armazenamento**: `projects/<módulo>/<projeto>/originais/<aula>/p02_01.jpg` (página 2, 1ª imagem de cima para baixo) e o índice com as escolhas em `revisao/<aula>_imagens.json`. Fica fora de `assets/`, então o botão "Limpar imagens" não apaga as originais.
+- **Ligação com a aula**: o Gemini recebe a lista das originais e indica, no bloco de prompts, qual vai em cada `[IMG:...]`. No painel **🖼️ Imagens da aula** dá para conferir, trocar entre *Original do PDF*, *Imagem nova* e *Sem imagem*, e travar a original.
+- **🔒 Imagens sensíveis** (por projeto): as originais ficam travadas, não aparece a opção de imagem nova, o Gemini não gera prompt do ChatGPT para elas e as miniaturas ficam borradas até clicar em "Mostrar fotos".
+- **Geração do PDF**: usa a escolha de cada tag e avisa quais imagens ficaram sem arquivo (antes elas sumiam do PDF sem aviso).
+
+Testes: `python -m pytest test_originais.py`
+
+---
+
 ## Skills Antigravity Utilizadas
 
 - `python-pro` — código Python moderno e robusto

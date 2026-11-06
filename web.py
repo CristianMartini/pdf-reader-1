@@ -996,6 +996,9 @@ def api_upload_signed_url():
         blob_path = f"projects/{safe_mod}/{safe_proj}/covers/{safe_name}"
     elif kind == "queue":
         blob_path = f"temp_queue/{safe_mod}/{safe_proj}/{safe_name}"
+    elif kind == "original":
+        # PDF antigo de uma aula já pronta, só para extrair as imagens originais
+        blob_path = f"temp_originais/{safe_mod}/{safe_proj}/{safe_name}"
     else:
         return jsonify(ok=False, error="Tipo de upload inválido")
 
@@ -1118,6 +1121,7 @@ def api_generate():
     pd      = _pdir(module, project)
     ad      = _adir(module, project)
     results = []
+    avisos  = []  # imagens pedidas na aula que não foram encontradas
 
     try:
         # Sincroniza apenas markdowns do Firebase antes da geração
@@ -1131,7 +1135,12 @@ def api_generate():
             output_path = os.path.join(pd, pdf_name)
             if os.path.isfile(md_path):
                 meta = extract_meta(md_path)
-                build_from_md(md_path, output_path, assets_dir=ad, meta=meta)
+                faltando = []
+                build_from_md(md_path, output_path, assets_dir=ad, meta=meta,
+                              image_map=_mapa_de_imagens_da_aula(module, project, fname),
+                              faltando=faltando)
+                if faltando:
+                    avisos.append({"arquivo": fname, "faltando": faltando})
                 # Upload do PDF gerado para o Firebase
                 _upload_file_to_firebase(module, project, pdf_name, is_asset=False)
                 results.append(os.path.basename(output_path))
@@ -1141,7 +1150,7 @@ def api_generate():
                     os.remove(output_path)
                 except Exception:
                     pass
-        return jsonify(ok=True, result=results)
+        return jsonify(ok=True, result=results, avisos=avisos)
     except Exception as e:
         traceback.print_exc()
         return jsonify(ok=False, error=str(e))
@@ -1161,6 +1170,13 @@ def api_generate():
                 print(f"🗑️ Local: Limpo diretório de covers temporários pós-compilação: {cd}")
         except Exception as ex:
             print(f"⚠️ Erro ao limpar covers temporários: {ex}")
+        # E as imagens originais baixadas para esta geração (sem Firebase, a pasta local é a única cópia)
+        od = os.path.join(pd, ORIGINAIS_DIR)
+        try:
+            if get_bucket() and os.path.isdir(od):
+                shutil.rmtree(od)
+        except Exception as ex:
+            print(f"⚠️ Erro ao limpar originais temporárias: {ex}")
 
 
 # ════════════════════════════════════════
@@ -1245,7 +1261,14 @@ Para criar transições claras entre tópicos distintos, use três traços em um
     )
 
 
-def _extract_text_from_pdf(filepath: str) -> str:
+MARCA_IMAGEM_ORIGINAL = "[IMAGEM ORIGINAL:"
+
+
+def _extract_text_from_pdf(filepath: str, marcadores: dict = None) -> str:
+    """marcadores: {pagina: [(topo_pt, arquivo)]} (engine.originais.marcadores_por_pagina).
+    Quando informado, o texto ganha uma linha [IMAGEM ORIGINAL: arquivo] antes do primeiro
+    trecho que fica abaixo de cada imagem original, para o Gemini posicionar as tags [IMG]
+    mesmo sem ver o PDF."""
     import re
     from pypdf import PdfReader
     
@@ -1255,11 +1278,12 @@ def _extract_text_from_pdf(filepath: str) -> str:
     pages_lines = []
     header_footer_candidates = {}
     
-    for page in reader.pages:
+    for page_num, page in enumerate(reader.pages, 1):
         mb = page.mediabox
         height = mb.top - mb.bottom
         
         page_texts = []
+        imagens_pendentes = list((marcadores or {}).get(page_num, []))
         
         def visitor(text, cm, tm, font_dict, font_size):
             y_abs = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
@@ -1270,9 +1294,14 @@ def _extract_text_from_pdf(filepath: str) -> str:
             is_margin = pct_y > 0.92 or pct_y < 0.08
             
             if not is_margin and text.strip():
+                # Imagens originais que começam acima deste trecho entram antes dele
+                while imagens_pendentes and imagens_pendentes[0][0] > y_abs:
+                    page_texts.append(f"\n{MARCA_IMAGEM_ORIGINAL} {imagens_pendentes.pop(0)[1]}]\n")
                 page_texts.append(text)
                 
         page.extract_text(visitor_text=visitor)
+        for _, arquivo in imagens_pendentes:
+            page_texts.append(f"\n{MARCA_IMAGEM_ORIGINAL} {arquivo}]\n")
         
         if page_texts:
             t = "".join(page_texts)
@@ -1280,15 +1309,17 @@ def _extract_text_from_pdf(filepath: str) -> str:
             pages_lines.append(lines)
             
             # Coleta candidatos a cabeçalho/rodapé do corpo restante (primeiras 2 e últimas 2 linhas)
+            # (as marcas de imagem original não entram nessa conta)
+            text_lines = [line for line in lines if not line.startswith(MARCA_IMAGEM_ORIGINAL)]
             candidates = []
-            if len(lines) >= 1:
-                candidates.append(lines[0])
-            if len(lines) >= 2:
-                candidates.append(lines[1])
-            if len(lines) >= 2:
-                candidates.append(lines[-1])
-            if len(lines) >= 3:
-                candidates.append(lines[-2])
+            if len(text_lines) >= 1:
+                candidates.append(text_lines[0])
+            if len(text_lines) >= 2:
+                candidates.append(text_lines[1])
+            if len(text_lines) >= 2:
+                candidates.append(text_lines[-1])
+            if len(text_lines) >= 3:
+                candidates.append(text_lines[-2])
                 
             for c in set(candidates):
                 if c:
@@ -1334,6 +1365,197 @@ def _prompts_rel(md_filename: str) -> str:
     return f"{REVISAO_DIR}/{base}_prompts_chatgpt.txt"
 
 
+# ── Imagens originais das aulas (fotos do PDF antigo que não podem ser trocadas) ──
+# projects/<módulo>/<projeto>/originais/<aula>/p02_01.jpg  ← imagens extraídas do PDF antigo
+# projects/<módulo>/<projeto>/revisao/<aula>_imagens.json  ← índice + escolha de cada [IMG]
+# Ficam fora de assets/: o botão "Limpar imagens" e a busca aproximada de nomes não as alcançam.
+ORIGINAIS_DIR = "originais"
+
+
+def _aula_base(md_filename: str) -> str:
+    return os.path.splitext(secure_filename(md_filename))[0]
+
+
+def _imagens_rel(md_filename: str) -> str:
+    """Caminho (relativo ao projeto) do índice de imagens originais e escolhas de uma aula."""
+    return f"{REVISAO_DIR}/{_aula_base(md_filename)}_imagens.json"
+
+
+def _odir(module: str, project: str, aula: str) -> str:
+    """Pasta local das imagens originais de uma aula (aula = nome do .md sem extensão)."""
+    return os.path.join(_pdir(module, project), ORIGINAIS_DIR, secure_filename(aula))
+
+
+def _ler_json_do_projeto(module: str, project: str, rel: str) -> dict:
+    """Lê um JSON do projeto, buscando a versão da nuvem quando o Firebase está ativo
+    (a cópia local pode estar desatualizada em outra instância do servidor)."""
+    path = os.path.join(_pdir(module, project), rel)
+    b = get_bucket()
+    if b:
+        try:
+            blob = b.blob(f"{_blob_prefix(module, project)}{rel}")
+            if blob.exists():
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                blob.download_to_filename(path)
+        except Exception as e:
+            print(f"❌ Firebase: Erro ao baixar {rel}: {e}")
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"⚠️ JSON inválido em {rel}: {e}")
+    return {}
+
+
+def _salvar_json_do_projeto(module: str, project: str, rel: str, dados: dict):
+    path = os.path.join(_pdir(module, project), rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(dados, f, ensure_ascii=False, indent=1)
+    _upload_file_to_firebase(module, project, rel, is_asset=False)
+
+
+def _projeto_tem_imagens_sensiveis(module: str, project: str) -> bool:
+    return bool(_ler_json_do_projeto(module, project, "project_info.json").get("imagens_sensiveis"))
+
+
+def _baixar_original(module: str, project: str, aula: str, arquivo: str) -> bool:
+    destino = os.path.join(_odir(module, project, aula), arquivo)
+    if os.path.isfile(destino):
+        return True
+    b = get_bucket()
+    if not b:
+        return False
+    try:
+        blob = b.blob(f"{_blob_prefix(module, project)}{ORIGINAIS_DIR}/{secure_filename(aula)}/{arquivo}")
+        if blob.exists():
+            os.makedirs(os.path.dirname(destino), exist_ok=True)
+            blob.download_to_filename(destino)
+            return True
+    except Exception as e:
+        print(f"❌ Firebase: Erro ao baixar original {aula}/{arquivo}: {e}")
+    return False
+
+
+def _salvar_originais_do_pdf(module: str, project: str, md_filename: str, pdf_path: str, nome_pdf: str):
+    """Extrai as imagens do PDF antigo da aula para originais/<aula>/ e atualiza o índice.
+    Escolhas já feitas são mantidas, menos as que apontam para imagens que não existem mais.
+    Devolve (dados da aula, se as imagens deste PDF foram usadas)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from engine.originais import extrair_originais, limpar_escolhas
+
+    aula = _aula_base(md_filename)
+    rel = _imagens_rel(md_filename)
+    destino = _odir(module, project, aula)
+    tmp_destino = destino + ".novo"
+    shutil.rmtree(tmp_destino, ignore_errors=True)
+    indice = extrair_originais(pdf_path, tmp_destino)
+    indice["pdf_original"] = nome_pdf
+
+    # Um PDF sem imagens (ex: nova versão só com texto) nunca apaga as originais já guardadas
+    dados = _ler_json_do_projeto(module, project, rel)
+    if not indice["originais"] and dados.get("originais"):
+        shutil.rmtree(tmp_destino, ignore_errors=True)
+        print(f"🖼️ Originais: {nome_pdf} não tem imagens; mantidas as {len(dados['originais'])} originais de {aula}")
+        return dados, False
+    shutil.rmtree(destino, ignore_errors=True)
+    os.replace(tmp_destino, destino)
+
+    b = get_bucket()
+    if b:
+        prefixo = f"{_blob_prefix(module, project)}{ORIGINAIS_DIR}/{aula}/"
+        novos = {o["arquivo"] for o in indice["originais"]}
+        try:
+            for blob in b.list_blobs(prefix=prefixo):
+                if os.path.basename(blob.name) not in novos:
+                    blob.delete()
+        except Exception as e:
+            print(f"⚠️ Firebase: Erro ao limpar originais antigas de {aula}: {e}")
+
+        def envia(o):
+            try:
+                b.blob(prefixo + o["arquivo"]).upload_from_filename(os.path.join(destino, o["arquivo"]))
+                return True
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao enviar original {o['arquivo']}: {e}")
+                return False
+
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            enviados = list(ex.map(envia, indice["originais"]))
+        falhas = enviados.count(False)
+        if falhas:
+            indice["originais"] = [o for o, ok in zip(indice["originais"], enviados) if ok]
+            indice["descartadas"]["erros"] += falhas
+        # Como os assets, as originais ficam na nuvem (o disco do servidor é temporário)
+        shutil.rmtree(destino, ignore_errors=True)
+
+    escolhas = limpar_escolhas(dados.get("escolhas"), indice["originais"])
+    dados.update(indice)
+    dados["escolhas"] = escolhas
+    _salvar_json_do_projeto(module, project, rel, dados)
+    print(f"🖼️ Originais: {len(indice['originais'])} imagens de {nome_pdf} salvas para {aula} "
+          f"(descartadas: {indice['descartadas']})")
+    return dados, True
+
+
+def _originais_da_fila(module: str, project: str, safe_name: str, pdf_path: str, nome_pdf: str):
+    """Guarda as imagens originais de um PDF que entrou na fila, antes de ele ser apagado.
+    Devolve (resumo para o Gemini, marcadores para o texto). Uma falha aqui não trava a fila."""
+    from engine.originais import marcadores_por_pagina
+    try:
+        md_filename = os.path.splitext(safe_name)[0] + ".md"
+        dados, extraiu = _salvar_originais_do_pdf(module, project, md_filename, pdf_path, nome_pdf)
+        if not extraiu:
+            return [], None  # PDF sem imagens: as originais antigas ficam, mas não valem para este texto
+        resumo = [{"arquivo": o["arquivo"], "pagina": o["pagina"], "topo_pct": o["topo_pct"]}
+                  for o in dados["originais"]]
+        return resumo, marcadores_por_pagina(dados)
+    except Exception as e:
+        print(f"❌ Originais: falha ao extrair imagens de {safe_name}: {e}")
+        traceback.print_exc()
+        return [], None
+
+
+def _ligar_tags_as_originais(module: str, project: str, md_filename: str, md_text: str, prompts_text: str):
+    """Liga cada [IMG] da aula à imagem original que o Gemini indicou no bloco de prompts."""
+    from engine.originais import escolhas_iniciais
+    rel = _imagens_rel(md_filename)
+    dados = _ler_json_do_projeto(module, project, rel)
+    if not dados.get("originais"):
+        return dados
+    dados["escolhas"] = escolhas_iniciais(md_text, prompts_text, dados["originais"],
+                                          _projeto_tem_imagens_sensiveis(module, project),
+                                          dados.get("escolhas"))
+    _salvar_json_do_projeto(module, project, rel, dados)
+    return dados
+
+
+def _mapa_de_imagens_da_aula(module: str, project: str, md_filename: str):
+    """{tag: arquivo} com as escolhas da aula para o motor de PDF, baixando só as originais usadas."""
+    from engine.originais import mapa_de_imagens
+    escolhas = _ler_json_do_projeto(module, project, _imagens_rel(md_filename)).get("escolhas")
+    if not escolhas:
+        return None
+    aula = _aula_base(md_filename)
+    for e in escolhas.values():
+        if e.get("usar") == "original" and e.get("original"):
+            _baixar_original(module, project, aula, e["original"])
+    return mapa_de_imagens(escolhas, _odir(module, project, aula))
+
+
+def _resposta_imagens_aula(module: str, project: str, md_filename: str, dados: dict):
+    return jsonify(
+        ok=True,
+        aula=_aula_base(md_filename),
+        sensivel=_projeto_tem_imagens_sensiveis(module, project),
+        pdf_original=dados.get("pdf_original", ""),
+        originais=dados.get("originais", []),
+        descartadas=dados.get("descartadas", {}),
+        escolhas=dados.get("escolhas", {}),
+    )
+
+
 @app.route("/api/prompts/<module>/<project>/<filename>", methods=["GET"])
 def api_get_prompts(module, project, filename):
     safe_mod, safe_proj = secure_filename(module), secure_filename(project)
@@ -1354,6 +1576,122 @@ def api_get_prompts(module, project, filename):
     with open(path, "r", encoding="utf-8") as f:
         return jsonify(ok=True, content=f.read())
 
+
+@app.route("/api/imagens/<module>/<project>/<filename>", methods=["GET"])
+def api_imagens_aula(module, project, filename):
+    safe_mod, safe_proj = secure_filename(module), secure_filename(project)
+    dados = _ler_json_do_projeto(safe_mod, safe_proj, _imagens_rel(filename))
+    return _resposta_imagens_aula(safe_mod, safe_proj, filename, dados)
+
+
+@app.route("/api/imagens/<module>/<project>/<filename>", methods=["POST"])
+def api_salvar_escolhas_imagens(module, project, filename):
+    from engine.originais import VERSAO, limpar_escolhas
+    safe_mod, safe_proj = secure_filename(module), secure_filename(project)
+    rel = _imagens_rel(filename)
+    dados = _ler_json_do_projeto(safe_mod, safe_proj, rel)
+    dados.setdefault("versao", VERSAO)
+    dados["escolhas"] = limpar_escolhas((request.json or {}).get("escolhas"), dados.get("originais", []))
+    _salvar_json_do_projeto(safe_mod, safe_proj, rel, dados)
+    return _resposta_imagens_aula(safe_mod, safe_proj, filename, dados)
+
+
+@app.route("/api/imagens/<module>/<project>/<filename>/anexar", methods=["POST"])
+def api_anexar_pdf_original(module, project, filename):
+    """Extrai as imagens do PDF antigo de uma aula já pronta (o PDF da fila é apagado depois
+    da conversão, então a pessoa envia de novo o PDF que tem no computador)."""
+    safe_mod, safe_proj = secure_filename(module), secure_filename(project)
+    md_filename = secure_filename(filename)
+    if not md_filename.lower().endswith(".md"):
+        return jsonify(ok=False, error="Abra uma aula (.md) antes de anexar o PDF original")
+
+    tmp_dir = os.path.join(QUEUE_DIR, safe_mod, safe_proj, "anexos")
+    os.makedirs(tmp_dir, exist_ok=True)
+    b = get_bucket()
+    blob_tmp = None
+    enviado = request.files.get("file")
+    if enviado and enviado.filename:
+        # Sem Firebase: o PDF vem direto na requisição
+        nome_pdf = enviado.filename
+        pdf_path = os.path.join(tmp_dir, secure_filename(enviado.filename) or "original.pdf")
+        enviado.save(pdf_path)
+    else:
+        # Com Firebase: o navegador já enviou o PDF por URL assinada (kind "original")
+        data = request.json or {}
+        nome_tmp = secure_filename(data.get("arquivo", ""))
+        if not nome_tmp or not b:
+            return jsonify(ok=False, error="PDF original não recebido")
+        blob_tmp = b.blob(f"temp_originais/{safe_mod}/{safe_proj}/{nome_tmp}")
+        if not blob_tmp.exists():
+            return jsonify(ok=False, error="PDF original não encontrado no storage")
+        nome_pdf = data.get("nome") or nome_tmp
+        pdf_path = os.path.join(tmp_dir, nome_tmp)
+        blob_tmp.download_to_filename(pdf_path)
+
+    try:
+        if not pdf_path.lower().endswith(".pdf"):
+            return jsonify(ok=False, error="Envie o PDF original da aula")
+        dados, extraiu = _salvar_originais_do_pdf(safe_mod, safe_proj, md_filename, pdf_path, nome_pdf)
+        if not extraiu:
+            return jsonify(ok=False, error="Este PDF não tem imagens. As originais já salvas desta aula foram mantidas.")
+
+        # Liga as tags da aula às originais com o que o Gemini indicou nos prompts (se houver)
+        md_path = os.path.join(_pdir(safe_mod, safe_proj), md_filename)
+        if not os.path.isfile(md_path):
+            _download_file_from_firebase(safe_mod, safe_proj, md_filename, is_asset=False)
+        md_text = ""
+        if os.path.isfile(md_path):
+            with open(md_path, "r", encoding="utf-8") as f:
+                md_text = f.read()
+        prompts_text = ""
+        prompts_path = os.path.join(_pdir(safe_mod, safe_proj), _prompts_rel(md_filename))
+        if not os.path.isfile(prompts_path) and b:
+            try:
+                blob = b.blob(f"{_blob_prefix(safe_mod, safe_proj)}{_prompts_rel(md_filename)}")
+                if blob.exists():
+                    os.makedirs(os.path.dirname(prompts_path), exist_ok=True)
+                    blob.download_to_filename(prompts_path)
+            except Exception as e:
+                print(f"❌ Firebase: Erro ao baixar prompts de {md_filename}: {e}")
+        if os.path.isfile(prompts_path):
+            with open(prompts_path, "r", encoding="utf-8") as f:
+                prompts_text = f.read()
+        dados = _ligar_tags_as_originais(safe_mod, safe_proj, md_filename, md_text, prompts_text) or dados
+        return _resposta_imagens_aula(safe_mod, safe_proj, md_filename, dados)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(ok=False, error=f"Não foi possível ler as imagens do PDF: {e}")
+    finally:
+        try:
+            if os.path.isfile(pdf_path):
+                os.remove(pdf_path)
+        except Exception:
+            pass
+        if blob_tmp is not None:
+            try:
+                blob_tmp.delete()
+            except Exception:
+                pass
+
+
+@app.route("/api/projects/<module>/<project>/imagens-sensiveis", methods=["POST"])
+def api_imagens_sensiveis(module, project):
+    """Projeto com imagens sensíveis: as originais ficam travadas e não viram prompt do ChatGPT."""
+    safe_mod, safe_proj = secure_filename(module), secure_filename(project)
+    sensivel = bool((request.json or {}).get("sensivel"))
+    _ler_json_do_projeto(safe_mod, safe_proj, "project_info.json")  # parte da versão mais recente
+    _save_project_info(safe_mod, safe_proj, {"imagens_sensiveis": sensivel})
+    return jsonify(ok=True, sensivel=sensivel)
+
+
+@app.route("/projects/<module>/<project>/originais/<aula>/<path:arquivo>")
+def serve_original(module, project, aula, arquivo):
+    safe_mod, safe_proj = secure_filename(module), secure_filename(project)
+    nome = secure_filename(arquivo)
+    if not _baixar_original(safe_mod, safe_proj, aula, nome):
+        return jsonify(ok=False, error="Imagem original não encontrada"), 404
+    return send_from_directory(_odir(safe_mod, safe_proj, aula), nome)
+
 @app.route("/api/queue/upload/<module>/<project>", methods=["POST"])
 def api_queue_upload(module, project):
     files = request.files.getlist("files")
@@ -1369,11 +1707,15 @@ def api_queue_upload(module, project):
             f.save(filepath)
             
             ext = os.path.splitext(safe_name)[1].lower()
+            originais = []
             
             if ext == ".pdf":
                 # Extrai texto imediatamente no upload
                 try:
-                    raw_text = _extract_text_from_pdf(filepath)
+                    # Guarda as imagens originais (material didático) antes de o PDF ser apagado
+                    originais, marcadores = _originais_da_fila(secure_filename(module), secure_filename(project),
+                                                              safe_name, filepath, f.filename)
+                    raw_text = _extract_text_from_pdf(filepath, marcadores)
                     txt_filepath = filepath + ".txt"
                     with open(txt_filepath, "w", encoding="utf-8") as txt_f:
                         txt_f.write(raw_text)
@@ -1409,10 +1751,12 @@ def api_queue_upload(module, project):
             uploaded_files.append({
                 "name": f.filename,
                 "safe_name": safe_name,
-                "type": ext.replace(".", "")
+                "type": ext.replace(".", ""),
+                "originais": originais
             })
             
-    return jsonify(ok=True, files=uploaded_files)
+    return jsonify(ok=True, files=uploaded_files,
+                   sensivel=_projeto_tem_imagens_sensiveis(secure_filename(module), secure_filename(project)))
 
 
 @app.route("/api/queue/confirm/<module>/<project>", methods=["POST"])
@@ -1455,8 +1799,11 @@ def api_queue_confirm(module, project):
                     # 1. Download do PDF binário temporário do Firebase
                     pdf_blob.download_to_filename(pdf_filepath)
                     
-                    # 2. Extração de texto imediata localmente
-                    raw_text = _extract_text_from_pdf(pdf_filepath)
+                    # 1b. Guarda as imagens originais (material didático) antes de o PDF ser apagado
+                    originais, marcadores = _originais_da_fila(safe_mod, safe_proj, safe_name, pdf_filepath, name or safe_name)
+
+                    # 2. Extração de texto imediata localmente (marcando onde ficavam as imagens originais)
+                    raw_text = _extract_text_from_pdf(pdf_filepath, marcadores)
                     with open(txt_filepath, "w", encoding="utf-8") as txt_f:
                         txt_f.write(raw_text)
                     
@@ -1482,7 +1829,8 @@ def api_queue_confirm(module, project):
                     confirmed_files.append({
                         "name": name,
                         "safe_name": safe_name,
-                        "type": ext
+                        "type": ext,
+                        "originais": originais
                     })
             except Exception as e:
                 print(f"❌ Firebase: Erro ao confirmar e converter PDF {safe_name}: {e}")
@@ -1503,7 +1851,7 @@ def api_queue_confirm(module, project):
             except Exception as e:
                 print(f"❌ Firebase: Erro ao baixar arquivo da fila {safe_name}: {e}")
                 
-    return jsonify(ok=True, files=confirmed_files)
+    return jsonify(ok=True, files=confirmed_files, sensivel=_projeto_tem_imagens_sensiveis(safe_mod, safe_proj))
 
 
 
@@ -1688,6 +2036,12 @@ def api_queue_save(module, project):
             with open(rev_path, "w", encoding="utf-8") as f:
                 f.write(prompts + "\n")
             _upload_file_to_firebase(module, project, rel, is_asset=False)
+
+        # Liga cada [IMG] da aula à imagem original indicada pelo Gemini (se o PDF tinha imagens)
+        try:
+            _ligar_tags_as_originais(module, project, dest_filename, content, prompts)
+        except Exception as e:
+            print(f"⚠️ Originais: não foi possível ligar as imagens de {dest_filename}: {e}")
 
         # Limpar arquivo temporário local e no Firebase Storage
         project_queue_dir = os.path.join(QUEUE_DIR, secure_filename(module), secure_filename(project))
